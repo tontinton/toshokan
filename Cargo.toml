@@ -1,0 +1,9 @@
+[package]
+name = "toshokan"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tony Solomonik @ tony.solomonik@gmail.com"]
+
+[dependencies]
+serde_json = "1.0.117"
+tantivy = "0.22.0"
