@@ -5,11 +5,13 @@ use std::{
     io::{BufRead, BufReader},
 };
 
-use args::IndexArgs;
+use args::{IndexArgs, SearchArgs};
 use tantivy::{
+    collector::TopDocs,
     directory::MmapDirectory,
-    schema::{JsonObjectOptions, Schema, FAST, INDEXED, STORED},
-    DateOptions, DateTime, DateTimePrecision, Index, IndexWriter, TantivyDocument,
+    query::QueryParser,
+    schema::{JsonObjectOptions, Schema, FAST, INDEXED, STORED, STRING},
+    DateOptions, DateTime, DateTimePrecision, Document, Index, IndexWriter, TantivyDocument,
 };
 
 use crate::args::{parse_args, SubCommand};
@@ -18,9 +20,7 @@ fn index(args: IndexArgs) -> tantivy::Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
-        JsonObjectOptions::from(STORED)
-            .set_fast(Some("raw"))
-            .set_expand_dots_enabled(),
+        JsonObjectOptions::from(STORED | STRING).set_expand_dots_enabled(),
     );
     let timestamp_field = schema_builder.add_date_field(
         "timestamp",
@@ -70,11 +70,36 @@ fn index(args: IndexArgs) -> tantivy::Result<()> {
     Ok(())
 }
 
+fn search(args: SearchArgs) -> tantivy::Result<()> {
+    let index = Index::open(MmapDirectory::open(&args.input_dir)?)?;
+    let schema = index.schema();
+
+    let dynamic_field = schema.get_field("_dynamic")?;
+    let timestamp_field = schema.get_field("timestamp")?;
+
+    let reader = index.reader()?;
+    let searcher = reader.searcher();
+
+    let query_parser = QueryParser::for_index(&index, vec![dynamic_field, timestamp_field]);
+    let query = query_parser.parse_query(&args.query)?;
+    let docs = searcher.search(&query, &TopDocs::with_limit(1))?;
+
+    for (_, doc_address) in docs {
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        println!("{}", doc.to_json(&schema));
+    }
+
+    Ok(())
+}
+
 fn main() -> tantivy::Result<()> {
     let args = parse_args();
     match args.subcmd {
         SubCommand::Index(index_args) => {
             index(index_args)?;
+        }
+        SubCommand::Search(search_args) => {
+            search(search_args)?;
         }
     }
 
