@@ -5,8 +5,8 @@ use std::{
 
 use tantivy::{
     directory::MmapDirectory,
-    schema::{JsonObjectOptions, Schema, STORED},
-    Index, IndexWriter, TantivyDocument,
+    schema::{JsonObjectOptions, Schema, FAST, INDEXED, STORED},
+    DateOptions, DateTime, DateTimePrecision, Index, IndexWriter, TantivyDocument,
 };
 
 fn main() -> tantivy::Result<()> {
@@ -14,8 +14,12 @@ fn main() -> tantivy::Result<()> {
     schema_builder.add_json_field(
         "_dynamic",
         JsonObjectOptions::from(STORED)
-            .set_expand_dots_enabled()
-            .set_fast(Some("raw")),
+            .set_fast(Some("raw"))
+            .set_expand_dots_enabled(),
+    );
+    schema_builder.add_date_field(
+        "timestamp",
+        DateOptions::from(INDEXED | STORED | FAST).set_precision(DateTimePrecision::Seconds),
     );
 
     let schema = schema_builder.build();
@@ -24,11 +28,13 @@ fn main() -> tantivy::Result<()> {
     let mut index_writer: IndexWriter = index.writer(50_000_000)?;
 
     let dynamic_field = schema.get_field("_dynamic")?;
+    let timestamp_field = schema.get_field("timestamp")?;
 
     let mut reader = BufReader::new(File::open("/home/tony/hdfs-logs-multitenants-10000.json")?);
 
     let mut line = String::new();
     let mut i = 0;
+    let mut added = 0;
 
     loop {
         let len = reader.read_line(&mut line)?;
@@ -37,9 +43,15 @@ fn main() -> tantivy::Result<()> {
         }
 
         let mut doc = TantivyDocument::new();
-        let json_obj: serde_json::Value = serde_json::from_str(&line)?;
-        doc.add_field_value(dynamic_field, json_obj);
-        index_writer.add_document(doc)?;
+        let mut json_obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&line)?;
+        if let Some(timestamp_val) = json_obj.remove("timestamp") {
+            if let Some(timestamp) = timestamp_val.as_i64() {
+                doc.add_field_value(timestamp_field, DateTime::from_timestamp_secs(timestamp));
+                doc.add_field_value(dynamic_field, json_obj);
+                index_writer.add_document(doc)?;
+                added += 1;
+            }
+        }
 
         line.clear();
 
@@ -49,6 +61,7 @@ fn main() -> tantivy::Result<()> {
         }
     }
 
+    println!("Commiting {added} documents, after processing {i}");
     index_writer.commit()?;
 
     Ok(())
