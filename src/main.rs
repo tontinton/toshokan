@@ -1,36 +1,39 @@
+mod args;
+
 use std::{
-    fs::File,
+    fs::{create_dir, File},
     io::{BufRead, BufReader},
 };
 
+use args::IndexArgs;
 use tantivy::{
     directory::MmapDirectory,
     schema::{JsonObjectOptions, Schema, FAST, INDEXED, STORED},
     DateOptions, DateTime, DateTimePrecision, Index, IndexWriter, TantivyDocument,
 };
 
-fn main() -> tantivy::Result<()> {
+use crate::args::{parse_args, SubCommand};
+
+fn index(args: IndexArgs) -> tantivy::Result<()> {
     let mut schema_builder = Schema::builder();
-    schema_builder.add_json_field(
+    let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
         JsonObjectOptions::from(STORED)
             .set_fast(Some("raw"))
             .set_expand_dots_enabled(),
     );
-    schema_builder.add_date_field(
+    let timestamp_field = schema_builder.add_date_field(
         "timestamp",
         DateOptions::from(INDEXED | STORED | FAST).set_precision(DateTimePrecision::Seconds),
     );
 
     let schema = schema_builder.build();
 
-    let index = Index::open_or_create(MmapDirectory::open("/home/tony/test")?, schema.clone())?;
+    let _ = create_dir(&args.output_dir);
+    let index = Index::open_or_create(MmapDirectory::open(&args.output_dir)?, schema.clone())?;
     let mut index_writer: IndexWriter = index.writer(50_000_000)?;
 
-    let dynamic_field = schema.get_field("_dynamic")?;
-    let timestamp_field = schema.get_field("timestamp")?;
-
-    let mut reader = BufReader::new(File::open("/home/tony/hdfs-logs-multitenants-10000.json")?);
+    let mut reader = BufReader::new(File::open(&args.input_path)?);
 
     let mut line = String::new();
     let mut i = 0;
@@ -63,6 +66,17 @@ fn main() -> tantivy::Result<()> {
 
     println!("Commiting {added} documents, after processing {i}");
     index_writer.commit()?;
+
+    Ok(())
+}
+
+fn main() -> tantivy::Result<()> {
+    let args = parse_args();
+    match args.subcmd {
+        SubCommand::Index(index_args) => {
+            index(index_args)?;
+        }
+    }
 
     Ok(())
 }
