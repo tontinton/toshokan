@@ -32,6 +32,14 @@ pub struct SearchArgs {
 
     #[clap(help = "Query in tantivy syntax.")]
     pub query: String,
+
+    #[clap(
+        short,
+        long,
+        default_value = "1",
+        help = "Limit to a number of top results."
+    )]
+    pub limit: usize,
 }
 
 #[must_use]

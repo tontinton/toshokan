@@ -82,7 +82,7 @@ fn search(args: SearchArgs) -> tantivy::Result<()> {
 
     let query_parser = QueryParser::for_index(&index, vec![dynamic_field, timestamp_field]);
     let query = query_parser.parse_query(&args.query)?;
-    let docs = searcher.search(&query, &TopDocs::with_limit(1))?;
+    let docs = searcher.search(&query, &TopDocs::with_limit(args.limit))?;
 
     for (_, doc_address) in docs {
         let doc: TantivyDocument = searcher.doc(doc_address)?;
