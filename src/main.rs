@@ -67,6 +67,12 @@ fn index(args: IndexArgs) -> tantivy::Result<()> {
     println!("Commiting {added} documents, after processing {i}");
     index_writer.commit()?;
 
+    if args.merge {
+        let segment_ids = index.searchable_segment_ids()?;
+        println!("Merging {} segments", segment_ids.len());
+        index_writer.merge(&segment_ids).wait()?;
+    }
+
     Ok(())
 }
 

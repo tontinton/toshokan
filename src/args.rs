@@ -23,6 +23,9 @@ pub struct IndexArgs {
 
     #[clap(help = "Path to the output index dir. Will create if doesn't exist.")]
     pub output_dir: String,
+
+    #[clap(short, long, help = "Merge all created segments into one segment.")]
+    pub merge: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
