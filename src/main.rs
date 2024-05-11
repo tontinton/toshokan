@@ -1,4 +1,6 @@
 mod args;
+mod bincode;
+mod single_file_index_writer;
 
 use std::{
     fs::{create_dir, File},
@@ -6,18 +8,34 @@ use std::{
 };
 
 use args::{IndexArgs, SearchArgs};
+use once_cell::sync::Lazy;
+use opendal::{
+    layers::{BlockingLayer, LoggingLayer},
+    BlockingOperator, Operator,
+};
 use tantivy::{
     collector::TopDocs,
     directory::MmapDirectory,
     query::QueryParser,
-    schema::{JsonObjectOptions, Schema, FAST, INDEXED, STORED, STRING},
-    DateOptions, DateTime, DateTimePrecision, Document, Index, IndexWriter, ReloadPolicy,
-    TantivyDocument,
+    schema::{
+        DateOptions, DateTimePrecision, JsonObjectOptions, Schema, FAST, INDEXED, STORED, STRING,
+    },
+    DateTime, Document, Index, IndexWriter, ReloadPolicy, TantivyDocument,
 };
 
-use crate::args::{parse_args, SubCommand};
+use crate::{
+    args::{parse_args, SubCommand},
+    single_file_index_writer::SingleFileIndexWriter,
+};
 
-fn index(args: IndexArgs) -> tantivy::Result<()> {
+static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+});
+
+fn index(args: IndexArgs) -> anyhow::Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
@@ -74,10 +92,37 @@ fn index(args: IndexArgs) -> tantivy::Result<()> {
         index_writer.merge(&segment_ids).wait()?;
     }
 
+    println!("Joining merging threads");
+    index_writer.wait_merging_threads()?;
+
+    let single_file_index_writer =
+        SingleFileIndexWriter::from_managed_directory(index.directory())?;
+
+    let mut builder = opendal::services::Fs::default();
+    builder.root(&args.output_dir);
+
+    let _guard = RUNTIME.enter();
+    let op: BlockingOperator = Operator::new(builder)?
+        .layer(BlockingLayer::create()?)
+        .layer(LoggingLayer::default())
+        .finish()
+        .blocking();
+
+    let mut writer = op
+        .writer_with("output.index")
+        .content_type("application/octet-stream")
+        .buffer(5_000_000)
+        .call()?
+        .into_std_write();
+
+    println!("Writing single index file");
+    single_file_index_writer.write(&mut writer)?;
+    writer.close()?;
+
     Ok(())
 }
 
-fn search(args: SearchArgs) -> tantivy::Result<()> {
+fn search(args: SearchArgs) -> anyhow::Result<()> {
     let index = Index::open(MmapDirectory::open(&args.input_dir)?)?;
     let schema = index.schema();
 
@@ -102,7 +147,7 @@ fn search(args: SearchArgs) -> tantivy::Result<()> {
     Ok(())
 }
 
-fn main() -> tantivy::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = parse_args();
     match args.subcmd {
         SubCommand::Index(index_args) => {
