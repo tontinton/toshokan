@@ -11,7 +11,8 @@ use tantivy::{
     directory::MmapDirectory,
     query::QueryParser,
     schema::{JsonObjectOptions, Schema, FAST, INDEXED, STORED, STRING},
-    DateOptions, DateTime, DateTimePrecision, Document, Index, IndexWriter, TantivyDocument,
+    DateOptions, DateTime, DateTimePrecision, Document, Index, IndexWriter, ReloadPolicy,
+    TantivyDocument,
 };
 
 use crate::args::{parse_args, SubCommand};
@@ -83,7 +84,10 @@ fn search(args: SearchArgs) -> tantivy::Result<()> {
     let dynamic_field = schema.get_field("_dynamic")?;
     let timestamp_field = schema.get_field("timestamp")?;
 
-    let reader = index.reader()?;
+    let reader = index
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()?;
     let searcher = reader.searcher();
 
     let query_parser = QueryParser::for_index(&index, vec![dynamic_field, timestamp_field]);
