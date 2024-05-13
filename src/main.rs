@@ -1,6 +1,6 @@
 mod args;
 mod bincode;
-mod single_file_index_writer;
+mod unified_index_writer;
 
 use std::{
     fs::{create_dir, File},
@@ -25,7 +25,7 @@ use tantivy::{
 
 use crate::{
     args::{parse_args, SubCommand},
-    single_file_index_writer::SingleFileIndexWriter,
+    unified_index_writer::UnifiedIndexWriter,
 };
 
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
@@ -95,8 +95,7 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
     println!("Joining merging threads");
     index_writer.wait_merging_threads()?;
 
-    let single_file_index_writer =
-        SingleFileIndexWriter::from_managed_directory(index.directory())?;
+    let unified_index_writer = UnifiedIndexWriter::from_managed_directory(index.directory())?;
 
     let mut builder = opendal::services::Fs::default();
     builder.root(&args.output_dir);
@@ -115,8 +114,8 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
         .call()?
         .into_std_write();
 
-    println!("Writing single index file");
-    single_file_index_writer.write(&mut writer)?;
+    println!("Writing unified index file");
+    unified_index_writer.write(&mut writer)?;
     writer.close()?;
 
     Ok(())

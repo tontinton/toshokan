@@ -88,12 +88,12 @@ struct IndexFooter {
     version: u32,
 }
 
-pub struct SingleFileIndexWriter {
+pub struct UnifiedIndexWriter {
     file_readers: Vec<FileReader>,
     file_map: HashMap<PathBuf, (u64, u64)>,
 }
 
-impl SingleFileIndexWriter {
+impl UnifiedIndexWriter {
     pub fn from_managed_directory(directory: &ManagedDirectory) -> anyhow::Result<Self> {
         let file_readers = directory
             .list_managed_files()
@@ -115,12 +115,12 @@ impl SingleFileIndexWriter {
             self.file_map.insert(file_reader.path, (start, written));
         }
 
-        let bytes = bincode_options().serialize(&IndexFooter {
+        let footer_bytes = bincode_options().serialize(&IndexFooter {
             version: VERSION,
             file_map: self.file_map,
         })?;
-        let footer = std::io::copy(&mut Cursor::new(bytes), writer)?;
+        let footer_size = std::io::copy(&mut Cursor::new(footer_bytes), writer)?;
 
-        Ok((written + footer, footer))
+        Ok((written + footer_size, footer_size))
     }
 }
