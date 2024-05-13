@@ -4,7 +4,7 @@ mod opendal_reader;
 mod unified_index;
 
 use std::{
-    fs::{create_dir, File},
+    fs::{create_dir, read_to_string, write, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     sync::Arc,
@@ -32,6 +32,8 @@ use crate::{
     opendal_reader::OpenDalReader,
     unified_index::writer::UnifiedIndexWriter,
 };
+
+const FOOTER_FILE_PATH: &str = "/tmp/footer";
 
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -126,6 +128,8 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
     let (total_len, footer_len) = unified_index_writer.write(&mut writer)?;
     writer.close()?;
 
+    write(FOOTER_FILE_PATH, footer_len.to_string())?;
+
     println!(
         "Index file length: {}. Footer length: {}",
         total_len, footer_len
@@ -151,7 +155,16 @@ fn search(args: SearchArgs) -> anyhow::Result<()> {
         reader,
     )?));
 
-    let index = Index::open(UnifiedDirectory::open_with_len(file_slice, args.footer)?)?;
+    let footer = if let Some(f) = args.footer {
+        f
+    } else {
+        read_to_string(FOOTER_FILE_PATH)?.parse::<u64>()?
+    };
+
+    let index = Index::open(UnifiedDirectory::open_with_len(
+        file_slice,
+        footer as usize,
+    )?)?;
     let schema = index.schema();
 
     let dynamic_field = schema.get_field("_dynamic")?;

@@ -41,11 +41,15 @@ pub struct SearchArgs {
     #[clap(help = "Path to the unified index file.")]
     pub input_file: String,
 
-    #[clap(help = "Footer metadata section length in the unified index file.")]
-    pub footer: usize,
-
     #[clap(help = "Query in tantivy syntax.")]
     pub query: String,
+
+    #[clap(
+        short,
+        long,
+        help = "Footer metadata section length in the unified index file."
+    )]
+    pub footer: Option<u64>,
 
     #[clap(
         short,
