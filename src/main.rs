@@ -1,6 +1,6 @@
 mod args;
 mod bincode;
-mod opendal_reader;
+mod opendal_file_handle;
 mod unified_index;
 
 use std::{
@@ -29,7 +29,7 @@ use unified_index::directory::UnifiedDirectory;
 
 use crate::{
     args::{parse_args, SubCommand},
-    opendal_reader::OpenDalReader,
+    opendal_file_handle::OpenDalFileHandle,
     unified_index::writer::UnifiedIndexWriter,
 };
 
@@ -150,7 +150,7 @@ fn search(args: SearchArgs) -> anyhow::Result<()> {
         .blocking();
 
     let reader = op.reader_with(&args.input_file).call()?;
-    let file_slice = FileSlice::new(Arc::new(OpenDalReader::from_path(
+    let file_slice = FileSlice::new(Arc::new(OpenDalFileHandle::from_path(
         Path::new(&args.input_file),
         reader,
     )?));

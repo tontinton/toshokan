@@ -6,12 +6,12 @@ use tantivy::{
     HasLen,
 };
 
-pub struct OpenDalReader {
+pub struct OpenDalFileHandle {
     size: u64,
     reader: BlockingReader,
 }
 
-impl OpenDalReader {
+impl OpenDalFileHandle {
     pub fn from_path(path: &Path, reader: BlockingReader) -> std::io::Result<Self> {
         let size = metadata(path)?.len();
         Ok(Self::new(size, reader))
@@ -22,13 +22,13 @@ impl OpenDalReader {
     }
 }
 
-impl std::fmt::Debug for OpenDalReader {
+impl std::fmt::Debug for OpenDalFileHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "FileReader({})", &self.size)
     }
 }
 
-impl FileHandle for OpenDalReader {
+impl FileHandle for OpenDalFileHandle {
     fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
         let mut bytes = Vec::new();
         self.reader
@@ -38,7 +38,7 @@ impl FileHandle for OpenDalReader {
     }
 }
 
-impl HasLen for OpenDalReader {
+impl HasLen for OpenDalFileHandle {
     fn len(&self) -> usize {
         self.size as usize
     }
@@ -72,7 +72,7 @@ mod tests {
             .finish()
             .blocking();
 
-        let reader = OpenDalReader::from_path(
+        let reader = OpenDalFileHandle::from_path(
             &path,
             op.reader_with(&path_buf.file_name().unwrap().to_str().unwrap())
                 .call()?,
