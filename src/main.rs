@@ -53,8 +53,8 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
 
     let schema = schema_builder.build();
 
-    let _ = create_dir(&args.output_dir);
-    let index = Index::open_or_create(MmapDirectory::open(&args.output_dir)?, schema.clone())?;
+    let _ = create_dir(&args.build_dir);
+    let index = Index::open_or_create(MmapDirectory::open(&args.build_dir)?, schema.clone())?;
     let mut index_writer: IndexWriter = index.writer(50_000_000)?;
 
     let mut reader = BufReader::new(File::open(&args.input_path)?);
@@ -101,12 +101,12 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
     index_writer.wait_merging_threads()?;
 
     let unified_index_writer = UnifiedIndexWriter::from_file_paths(
-        Path::new(&args.output_dir),
+        Path::new(&args.build_dir),
         index.directory().list_managed_files(),
     )?;
 
     let mut builder = opendal::services::Fs::default();
-    builder.root(&args.output_dir);
+    builder.root("/");
 
     let _guard = RUNTIME.enter();
     let op: BlockingOperator = Operator::new(builder)?
@@ -116,7 +116,7 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
         .blocking();
 
     let mut writer = op
-        .writer_with("output.index")
+        .writer_with(&args.output_path)
         .content_type("application/octet-stream")
         .buffer(5_000_000)
         .call()?

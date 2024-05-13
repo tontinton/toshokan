@@ -21,8 +21,16 @@ pub struct IndexArgs {
     #[clap(help = "Path to the input jsonl file you want to index.")]
     pub input_path: String,
 
-    #[clap(help = "Path to the output index dir. Will create if doesn't exist.")]
-    pub output_dir: String,
+    #[clap(help = "Path to the output index file.")]
+    pub output_path: String,
+
+    #[clap(
+        short,
+        long,
+        help = "Path to the dir to build in the inverted indexes.",
+        default_value = "/tmp/toshokan"
+    )]
+    pub build_dir: String,
 
     #[clap(short, long, help = "Merge all created segments into one segment.")]
     pub merge: bool,
