@@ -6,6 +6,7 @@ use std::{
 
 use bincode::Options;
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use tantivy::{
     directory::{FileSlice, ManagedDirectory, OwnedBytes},
     Directory, HasLen,
@@ -14,6 +15,7 @@ use tantivy::{
 use crate::bincode::bincode_options;
 
 const CHUNK_SIZE: usize = 1024 * 1024; // 1MB
+const VERSION: u32 = 1;
 
 static META_FILEPATH: Lazy<&'static Path> = Lazy::new(|| Path::new("meta.json"));
 
@@ -80,6 +82,12 @@ impl FileReader {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexFooter {
+    file_map: HashMap<PathBuf, (u64, u64)>,
+    version: u32,
+}
+
 pub struct SingleFileIndexWriter {
     file_readers: Vec<FileReader>,
     file_map: HashMap<PathBuf, (u64, u64)>,
@@ -107,7 +115,10 @@ impl SingleFileIndexWriter {
             self.file_map.insert(file_reader.path, (start, written));
         }
 
-        let bytes = bincode_options().serialize(&self.file_map)?;
+        let bytes = bincode_options().serialize(&IndexFooter {
+            version: VERSION,
+            file_map: self.file_map,
+        })?;
         let footer = std::io::copy(&mut Cursor::new(bytes), writer)?;
 
         Ok((written + footer, footer))

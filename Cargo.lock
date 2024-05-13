@@ -1886,6 +1886,7 @@ dependencies = [
  "clap",
  "once_cell",
  "opendal",
+ "serde",
  "serde_json",
  "tantivy",
  "tokio",
