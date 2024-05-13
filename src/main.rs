@@ -12,6 +12,7 @@ use std::{
 
 use args::{IndexArgs, SearchArgs};
 use color_eyre::eyre::Result;
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 use opendal::{
     layers::{BlockingLayer, LoggingLayer},
@@ -33,8 +34,6 @@ use crate::{
     opendal_file_handle::OpenDalFileHandle,
     unified_index::writer::UnifiedIndexWriter,
 };
-
-const FOOTER_FILE_PATH: &str = "/tmp/footer";
 
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -109,7 +108,7 @@ fn index(args: IndexArgs) -> Result<()> {
     )?;
 
     let mut builder = opendal::services::Fs::default();
-    builder.root("/");
+    builder.root(&args.index_dir);
 
     let _guard = RUNTIME.enter();
     let op: BlockingOperator = Operator::new(builder)?
@@ -118,8 +117,9 @@ fn index(args: IndexArgs) -> Result<()> {
         .finish()
         .blocking();
 
+    let id = uuid::Uuid::now_v7();
     let mut writer = op
-        .writer_with(&args.output_path)
+        .writer_with(&format!("{}.index", id))
         .content_type("application/octet-stream")
         .buffer(5_000_000)
         .call()?
@@ -129,7 +129,10 @@ fn index(args: IndexArgs) -> Result<()> {
     let (total_len, footer_len) = unified_index_writer.write(&mut writer)?;
     writer.close()?;
 
-    write(FOOTER_FILE_PATH, footer_len.to_string())?;
+    write(
+        Path::new(&args.index_dir).join(format!("{}.footer", id)),
+        footer_len.to_string(),
+    )?;
 
     println!(
         "Index file length: {}. Footer length: {}",
@@ -140,8 +143,25 @@ fn index(args: IndexArgs) -> Result<()> {
 }
 
 fn search(args: SearchArgs) -> Result<()> {
+    if args.limit == 0 {
+        return Ok(());
+    }
+
+    let index_ids = std::fs::read_dir(&args.index_dir)?
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| {
+            entry.file_name().to_str().map(|filename| {
+                filename
+                    .chars()
+                    .take_while(|&c| c != '.')
+                    .collect::<String>()
+            })
+        })
+        .unique()
+        .collect::<Vec<_>>();
+
     let mut builder = opendal::services::Fs::default();
-    builder.root("/");
+    builder.root(&args.index_dir);
 
     let _guard = RUNTIME.enter();
     let op: BlockingOperator = Operator::new(builder)?
@@ -150,40 +170,46 @@ fn search(args: SearchArgs) -> Result<()> {
         .finish()
         .blocking();
 
-    let reader = op.reader_with(&args.input_file).call()?;
-    let file_slice = FileSlice::new(Arc::new(OpenDalFileHandle::from_path(
-        Path::new(&args.input_file),
-        reader,
-    )?));
+    let mut printed = 0;
+    'ids_loop: for id in index_ids {
+        let index_filename = format!("{}.index", id);
+        let reader = op.reader_with(&index_filename).call()?;
+        let file_slice = FileSlice::new(Arc::new(OpenDalFileHandle::from_path(
+            &Path::new(&args.index_dir).join(&index_filename),
+            reader,
+        )?));
 
-    let footer = if let Some(f) = args.footer {
-        f
-    } else {
-        read_to_string(FOOTER_FILE_PATH)?.parse::<u64>()?
-    };
+        let footer_len =
+            read_to_string(&Path::new(&args.index_dir).join(&format!("{}.footer", id)))?
+                .parse::<u64>()?;
 
-    let index = Index::open(UnifiedDirectory::open_with_len(
-        file_slice,
-        footer as usize,
-    )?)?;
-    let schema = index.schema();
+        let index = Index::open(UnifiedDirectory::open_with_len(
+            file_slice,
+            footer_len as usize,
+        )?)?;
+        let schema = index.schema();
 
-    let dynamic_field = schema.get_field("_dynamic")?;
-    let timestamp_field = schema.get_field("timestamp")?;
+        let dynamic_field = schema.get_field("_dynamic")?;
+        let timestamp_field = schema.get_field("timestamp")?;
 
-    let reader = index
-        .reader_builder()
-        .reload_policy(ReloadPolicy::Manual)
-        .try_into()?;
-    let searcher = reader.searcher();
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::Manual)
+            .try_into()?;
+        let searcher = reader.searcher();
 
-    let query_parser = QueryParser::for_index(&index, vec![dynamic_field, timestamp_field]);
-    let query = query_parser.parse_query(&args.query)?;
-    let docs = searcher.search(&query, &TopDocs::with_limit(args.limit))?;
+        let query_parser = QueryParser::for_index(&index, vec![dynamic_field, timestamp_field]);
+        let query = query_parser.parse_query(&args.query)?;
+        let docs = searcher.search(&query, &TopDocs::with_limit(args.limit - printed))?;
 
-    for (_, doc_address) in docs {
-        let doc: TantivyDocument = searcher.doc(doc_address)?;
-        println!("{}", doc.to_json(&schema));
+        for (_, doc_address) in docs {
+            let doc: TantivyDocument = searcher.doc(doc_address)?;
+            println!("{}", doc.to_json(&schema));
+            printed += 1;
+            if printed >= args.limit {
+                break 'ids_loop;
+            }
+        }
     }
 
     Ok(())

@@ -1,11 +1,11 @@
 ```sh
-cargo run -- index ~/hdfs-logs-multitenants-10000.json ~/test.index --merge
+cargo run -- index ~/hdfs-logs-multitenants-10000.json ~/test --merge
 # Commiting 10000 documents, after processing 10000
 # Merging 3 segments
 # Joining merging threads
 # Writing unified index file
 
-cargo run -- search ~/test.index "severity_text:INFO" --limit 1 | jq .
+cargo run -- search ~/test "severity_text:INFO" --limit 1 | jq .
 # {
 #   "_dynamic": [
 #     {
