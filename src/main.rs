@@ -11,6 +11,7 @@ use std::{
 };
 
 use args::{IndexArgs, SearchArgs};
+use color_eyre::eyre::Result;
 use once_cell::sync::Lazy;
 use opendal::{
     layers::{BlockingLayer, LoggingLayer},
@@ -42,7 +43,7 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
         .unwrap()
 });
 
-fn index(args: IndexArgs) -> anyhow::Result<()> {
+fn index(args: IndexArgs) -> Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
@@ -138,7 +139,7 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn search(args: SearchArgs) -> anyhow::Result<()> {
+fn search(args: SearchArgs) -> Result<()> {
     let mut builder = opendal::services::Fs::default();
     builder.root("/");
 
@@ -188,7 +189,9 @@ fn search(args: SearchArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let args = parse_args();
     match args.subcmd {
         SubCommand::Index(index_args) => {

@@ -48,6 +48,7 @@ impl HasLen for OpenDalFileHandle {
 mod tests {
     use std::io::Write;
 
+    use color_eyre::eyre::Result;
     use opendal::{layers::BlockingLayer, BlockingOperator, Operator};
     use tempfile::NamedTempFile;
 
@@ -56,7 +57,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opendal_reader_read_file() -> anyhow::Result<()> {
+    fn opendal_reader_read_file() -> Result<()> {
         let mut file = NamedTempFile::new()?;
 
         file.write_all(b"abcdefgh")?;

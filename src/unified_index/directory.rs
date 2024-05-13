@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use bincode::Options;
+use color_eyre::eyre::Result;
 use tantivy::{
     directory::{error::OpenReadError, FileHandle, FileSlice},
     Directory,
@@ -17,7 +18,7 @@ pub struct UnifiedDirectory {
 }
 
 impl UnifiedDirectory {
-    pub fn open_with_len(slice: FileSlice, footer_len: usize) -> anyhow::Result<Self> {
+    pub fn open_with_len(slice: FileSlice, footer_len: usize) -> Result<Self> {
         let (slice, footer_slice) = slice.split_from_end(footer_len);
         let footer_bytes = footer_slice.read_bytes()?;
         let footer = bincode_options().deserialize(&footer_bytes)?;

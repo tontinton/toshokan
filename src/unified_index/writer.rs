@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::bail;
 use bincode::Options;
+use color_eyre::eyre::{bail, Result};
 
 use crate::bincode::bincode_options;
 
@@ -52,7 +52,7 @@ impl UnifiedIndexWriter {
         }
     }
 
-    pub fn write<W: std::io::Write>(mut self, writer: &mut W) -> anyhow::Result<(u64, u64)> {
+    pub fn write<W: std::io::Write>(mut self, writer: &mut W) -> Result<(u64, u64)> {
         let mut written = 0u64;
         for mut file_reader in self.file_readers {
             let start = written;
@@ -85,6 +85,7 @@ mod tests {
         sync::Arc,
     };
 
+    use color_eyre::eyre::Result;
     use tantivy::{
         directory::{FileSlice, OwnedBytes},
         Directory,
@@ -96,7 +97,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unified_index_write_then_read_2_files() -> anyhow::Result<()> {
+    fn unified_index_write_then_read_2_files() -> Result<()> {
         let mut file1 = tempfile()?;
         let mut file2 = tempfile()?;
         file1.write_all(b"hello")?;
