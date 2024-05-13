@@ -1,4 +1,4 @@
-use std::{fs::metadata, ops::Range, path::PathBuf};
+use std::{fs::metadata, ops::Range, path::Path};
 
 use opendal::BlockingReader;
 use tantivy::{
@@ -12,8 +12,8 @@ pub struct OpenDalReader {
 }
 
 impl OpenDalReader {
-    pub fn from_path(path: PathBuf, reader: BlockingReader) -> std::io::Result<Self> {
-        let size = metadata(&path)?.len();
+    pub fn from_path(path: &Path, reader: BlockingReader) -> std::io::Result<Self> {
+        let size = metadata(path)?.len();
         Ok(Self::new(size, reader))
     }
 
@@ -73,7 +73,7 @@ mod tests {
             .blocking();
 
         let reader = OpenDalReader::from_path(
-            path.to_path_buf(),
+            &path,
             op.reader_with(&path_buf.file_name().unwrap().to_str().unwrap())
                 .call()?,
         )?;

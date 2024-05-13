@@ -6,7 +6,7 @@ mod unified_index;
 use std::{
     fs::{create_dir, read_to_string, write, File},
     io::{BufRead, BufReader},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
@@ -151,7 +151,7 @@ fn search(args: SearchArgs) -> anyhow::Result<()> {
 
     let reader = op.reader_with(&args.input_file).call()?;
     let file_slice = FileSlice::new(Arc::new(OpenDalReader::from_path(
-        PathBuf::from(args.input_file),
+        Path::new(&args.input_file),
         reader,
     )?));
 
