@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{Cursor, Read},
+    ops::Range,
     path::{Path, PathBuf},
 };
 
@@ -84,13 +85,13 @@ impl FileReader {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct IndexFooter {
-    file_map: HashMap<PathBuf, (u64, u64)>,
+    file_offsets: HashMap<PathBuf, Range<u64>>,
     version: u32,
 }
 
 pub struct UnifiedIndexWriter {
     file_readers: Vec<FileReader>,
-    file_map: HashMap<PathBuf, (u64, u64)>,
+    file_offsets: HashMap<PathBuf, Range<u64>>,
 }
 
 impl UnifiedIndexWriter {
@@ -103,7 +104,7 @@ impl UnifiedIndexWriter {
 
         Ok(Self {
             file_readers,
-            file_map: HashMap::new(),
+            file_offsets: HashMap::new(),
         })
     }
 
@@ -112,12 +113,12 @@ impl UnifiedIndexWriter {
         for mut file_reader in self.file_readers {
             let start = written;
             written += std::io::copy(&mut file_reader.reader, writer)?;
-            self.file_map.insert(file_reader.path, (start, written));
+            self.file_offsets.insert(file_reader.path, start..written);
         }
 
         let footer_bytes = bincode_options().serialize(&IndexFooter {
             version: VERSION,
-            file_map: self.file_map,
+            file_offsets: self.file_offsets,
         })?;
         let footer_size = std::io::copy(&mut Cursor::new(footer_bytes), writer)?;
 
