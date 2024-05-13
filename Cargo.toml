@@ -8,6 +8,14 @@ authors = ["Tony Solomonik @ tony.solomonik@gmail.com"]
 [profile.dev.package.backtrace]
 opt-level = 3
 
+[profile.release]
+strip = true
+lto = true
+
+[profile.release-thin-lto]
+inherits = "release"
+lto = "thin"
+
 [dependencies]
 bincode = "1.3.3"
 clap = { version = "4.5.4", features = ["derive"] }
