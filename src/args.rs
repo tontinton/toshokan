@@ -30,8 +30,11 @@ pub struct IndexArgs {
 
 #[derive(Parser, Debug, Clone)]
 pub struct SearchArgs {
-    #[clap(help = "Path to the index dir.")]
-    pub input_dir: String,
+    #[clap(help = "Path to the unified index file.")]
+    pub input_file: String,
+
+    #[clap(help = "Footer metadata section length in the unified index file.")]
+    pub footer: usize,
 
     #[clap(help = "Query in tantivy syntax.")]
     pub query: String,

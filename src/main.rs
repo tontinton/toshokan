@@ -1,10 +1,13 @@
 mod args;
 mod bincode;
-mod unified_index_writer;
+mod opendal_reader;
+mod unified_index;
 
 use std::{
     fs::{create_dir, File},
     io::{BufRead, BufReader},
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use args::{IndexArgs, SearchArgs};
@@ -15,17 +18,19 @@ use opendal::{
 };
 use tantivy::{
     collector::TopDocs,
-    directory::MmapDirectory,
+    directory::{FileSlice, MmapDirectory},
     query::QueryParser,
     schema::{
         DateOptions, DateTimePrecision, JsonObjectOptions, Schema, FAST, INDEXED, STORED, STRING,
     },
     DateTime, Document, Index, IndexWriter, ReloadPolicy, TantivyDocument,
 };
+use unified_index::directory::UnifiedDirectory;
 
 use crate::{
     args::{parse_args, SubCommand},
-    unified_index_writer::UnifiedIndexWriter,
+    opendal_reader::OpenDalReader,
+    unified_index::writer::UnifiedIndexWriter,
 };
 
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
@@ -95,7 +100,10 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
     println!("Joining merging threads");
     index_writer.wait_merging_threads()?;
 
-    let unified_index_writer = UnifiedIndexWriter::from_managed_directory(index.directory())?;
+    let unified_index_writer = UnifiedIndexWriter::from_file_paths(
+        Path::new(&args.output_dir),
+        index.directory().list_managed_files(),
+    )?;
 
     let mut builder = opendal::services::Fs::default();
     builder.root(&args.output_dir);
@@ -115,14 +123,35 @@ fn index(args: IndexArgs) -> anyhow::Result<()> {
         .into_std_write();
 
     println!("Writing unified index file");
-    unified_index_writer.write(&mut writer)?;
+    let (total_len, footer_len) = unified_index_writer.write(&mut writer)?;
     writer.close()?;
+
+    println!(
+        "Index file length: {}. Footer length: {}",
+        total_len, footer_len
+    );
 
     Ok(())
 }
 
 fn search(args: SearchArgs) -> anyhow::Result<()> {
-    let index = Index::open(MmapDirectory::open(&args.input_dir)?)?;
+    let mut builder = opendal::services::Fs::default();
+    builder.root("/");
+
+    let _guard = RUNTIME.enter();
+    let op: BlockingOperator = Operator::new(builder)?
+        .layer(BlockingLayer::create()?)
+        .layer(LoggingLayer::default())
+        .finish()
+        .blocking();
+
+    let reader = op.reader_with(&args.input_file).call()?;
+    let file_slice = FileSlice::new(Arc::new(OpenDalReader::from_path(
+        PathBuf::from(args.input_file),
+        reader,
+    )?));
+
+    let index = Index::open(UnifiedDirectory::open_with_len(file_slice, args.footer)?)?;
     let schema = index.schema();
 
     let dynamic_field = schema.get_field("_dynamic")?;
