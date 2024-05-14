@@ -41,8 +41,8 @@ extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
 
-const DEFAULT_DEBUG_LOG_LEVEL: &str = "toshokan=trace";
-const DEFAULT_RELEASE_LOG_LEVEL: &str = "toshokan=info";
+const DEFAULT_DEBUG_LOG_LEVEL: &str = "toshokan=trace,opendal::services=info";
+const DEFAULT_RELEASE_LOG_LEVEL: &str = "toshokan=info,opendal::services=info";
 
 async fn index(args: IndexArgs) -> Result<()> {
     let mut schema_builder = Schema::builder();
