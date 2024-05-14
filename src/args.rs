@@ -39,9 +39,6 @@ The memory is split evenly between all indexing threads, once a thread reaches i
         default_value = "1073741824"
     )]
     pub memory_budget: usize,
-
-    #[clap(short, long, help = "Merge all created segments into one segment.")]
-    pub merge: bool,
 }
 
 #[derive(Parser, Debug, Clone)]

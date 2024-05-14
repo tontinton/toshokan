@@ -1,23 +1,24 @@
-use std::{fs::metadata, ops::Range, path::Path};
+use std::{ops::Range, path::Path};
 
-use opendal::BlockingReader;
+use opendal::Reader;
 use tantivy::{
     directory::{FileHandle, OwnedBytes},
     HasLen,
 };
+use tokio::fs::metadata;
 
 pub struct OpenDalFileHandle {
     size: u64,
-    reader: BlockingReader,
+    reader: Reader,
 }
 
 impl OpenDalFileHandle {
-    pub fn from_path(path: &Path, reader: BlockingReader) -> std::io::Result<Self> {
-        let size = metadata(path)?.len();
+    pub async fn from_path(path: &Path, reader: Reader) -> std::io::Result<Self> {
+        let size = metadata(path).await?.len();
         Ok(Self::new(size, reader))
     }
 
-    fn new(size: u64, reader: BlockingReader) -> Self {
+    fn new(size: u64, reader: Reader) -> Self {
         Self { size, reader }
     }
 }
@@ -31,8 +32,11 @@ impl std::fmt::Debug for OpenDalFileHandle {
 impl FileHandle for OpenDalFileHandle {
     fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
         let mut bytes = Vec::new();
-        self.reader
-            .read_into(&mut bytes, range.start as u64..range.end as u64)
+        let fut = self
+            .reader
+            .read_into(&mut bytes, range.start as u64..range.end as u64);
+        tokio::runtime::Handle::current()
+            .block_on(fut)
             .map_err(Into::<std::io::Error>::into)?;
         Ok(OwnedBytes::new(bytes))
     }
@@ -46,45 +50,34 @@ impl HasLen for OpenDalFileHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
+    use async_tempfile::TempFile;
     use color_eyre::eyre::Result;
-    use opendal::{layers::BlockingLayer, BlockingOperator, Operator};
-    use tempfile::NamedTempFile;
-
-    use crate::RUNTIME;
+    use opendal::Operator;
+    use tokio::{io::AsyncWriteExt, task::spawn_blocking};
 
     use super::*;
 
-    #[test]
-    fn opendal_reader_read_file() -> Result<()> {
-        let mut file = NamedTempFile::new()?;
+    #[tokio::test]
+    async fn opendal_reader_read_file() -> Result<()> {
+        let mut file = TempFile::new().await?;
 
-        file.write_all(b"abcdefgh")?;
-        let path = file.into_temp_path();
-        let path_buf = path.to_path_buf();
+        file.write_all(b"abcdefgh").await?;
+        let path = file.file_path();
 
         let mut builder = opendal::services::Fs::default();
-        builder.root(path_buf.parent().unwrap().to_str().unwrap());
+        builder.root(path.parent().unwrap().to_str().unwrap());
 
-        let _guard = RUNTIME.enter();
-        let op: BlockingOperator = Operator::new(builder)?
-            .layer(BlockingLayer::create()?)
-            .finish()
-            .blocking();
+        let op = Operator::new(builder)?.finish();
 
         let reader = OpenDalFileHandle::from_path(
             &path,
-            op.reader_with(&path_buf.file_name().unwrap().to_str().unwrap())
-                .call()?,
-        )?;
+            op.reader_with(&path.file_name().unwrap().to_str().unwrap())
+                .await?,
+        )
+        .await?;
 
-        assert_eq!(
-            reader.read_bytes(0..reader.len())?.to_vec(),
-            b"abcdefgh".to_vec()
-        );
-
-        path.close()?;
+        let bytes = spawn_blocking(move || reader.read_bytes(0..reader.len())).await??;
+        assert_eq!(bytes.to_vec(), b"abcdefgh".to_vec());
 
         Ok(())
     }

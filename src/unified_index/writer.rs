@@ -1,32 +1,35 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
-    io::{Cursor, Read},
+    io::Cursor,
     ops::Range,
     path::{Path, PathBuf},
 };
 
 use bincode::Options;
 use color_eyre::eyre::{bail, Result};
+use tokio::{
+    fs::File,
+    io::{AsyncRead, AsyncWrite},
+};
 
 use crate::bincode::bincode_options;
 
 use super::IndexFooter;
 
 struct FileReader {
-    reader: Box<dyn Read>,
+    reader: Box<dyn AsyncRead + Unpin>,
     file_name: PathBuf,
 }
 
 impl FileReader {
-    fn from_path(dir: &Path, file_name: PathBuf) -> std::io::Result<Self> {
+    async fn from_path(dir: &Path, file_name: PathBuf) -> std::io::Result<Self> {
         Ok(Self::new(
-            Box::new(File::open(dir.join(&file_name))?),
+            Box::new(File::open(dir.join(&file_name)).await?),
             file_name,
         ))
     }
 
-    fn new(reader: Box<dyn Read>, file_name: PathBuf) -> Self {
+    fn new(reader: Box<dyn AsyncRead + Unpin>, file_name: PathBuf) -> Self {
         Self { reader, file_name }
     }
 }
@@ -37,11 +40,14 @@ pub struct UnifiedIndexWriter {
 }
 
 impl UnifiedIndexWriter {
-    pub fn from_file_paths(dir: &Path, file_names: HashSet<PathBuf>) -> std::io::Result<Self> {
-        let file_readers = file_names
-            .into_iter()
-            .map(|path| FileReader::from_path(dir, path))
-            .collect::<std::io::Result<Vec<FileReader>>>()?;
+    pub async fn from_file_paths(
+        dir: &Path,
+        file_names: HashSet<PathBuf>,
+    ) -> std::io::Result<Self> {
+        let mut file_readers = Vec::with_capacity(file_names.len());
+        for file_name in file_names {
+            file_readers.push(FileReader::from_path(dir, file_name).await?);
+        }
         Ok(Self::new(file_readers))
     }
 
@@ -52,19 +58,22 @@ impl UnifiedIndexWriter {
         }
     }
 
-    pub fn write<W: std::io::Write>(mut self, writer: &mut W) -> Result<(u64, u64)> {
+    pub async fn write<W>(mut self, writer: &mut W) -> Result<(u64, u64)>
+    where
+        W: AsyncWrite + Unpin,
+    {
         let mut written = 0u64;
         for mut file_reader in self.file_readers {
             let start = written;
-            written += std::io::copy(&mut file_reader.reader, writer)?;
-            self.file_offsets
-                .insert(file_reader.file_name, start..written);
+            let file_name = file_reader.file_name;
+            written += tokio::io::copy(&mut file_reader.reader, writer).await?;
+            self.file_offsets.insert(file_name, start..written);
         }
 
         let footer_bytes = bincode_options().serialize(&IndexFooter::new(self.file_offsets))?;
         let footer_len = footer_bytes.len() as u64;
 
-        let footer_written = std::io::copy(&mut Cursor::new(footer_bytes), writer)?;
+        let footer_written = tokio::io::copy(&mut Cursor::new(footer_bytes), writer).await?;
         if footer_written < footer_len {
             bail!(
                 "written less than expected: {} < {}",
@@ -79,31 +88,30 @@ impl UnifiedIndexWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Seek, SeekFrom, Write},
-        path::Path,
-        sync::Arc,
-    };
+    use std::{io::SeekFrom, path::Path, sync::Arc};
 
+    use async_tempfile::TempFile;
     use color_eyre::eyre::Result;
+    use futures::try_join;
     use tantivy::{
         directory::{FileSlice, OwnedBytes},
         Directory,
     };
-    use tempfile::tempfile;
+    use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
     use crate::unified_index::directory::UnifiedDirectory;
 
     use super::*;
 
-    #[test]
-    fn unified_index_write_then_read_2_files() -> Result<()> {
-        let mut file1 = tempfile()?;
-        let mut file2 = tempfile()?;
-        file1.write_all(b"hello")?;
-        file2.write_all(b"world")?;
-        file1.seek(SeekFrom::Start(0))?;
-        file2.seek(SeekFrom::Start(0))?;
+    #[tokio::test]
+    async fn unified_index_write_then_read_2_files() -> Result<()> {
+        let mut file1 = TempFile::new().await?;
+        let mut file2 = TempFile::new().await?;
+        try_join!(file1.write_all(b"hello"), file2.write_all(b"world"))?;
+        try_join!(
+            file1.seek(SeekFrom::Start(0)),
+            file2.seek(SeekFrom::Start(0))
+        )?;
 
         let writer = UnifiedIndexWriter::new(vec![
             FileReader::new(Box::new(file1), PathBuf::from("a")),
@@ -111,7 +119,7 @@ mod tests {
         ]);
 
         let mut buf = vec![];
-        let (_, footer_len) = writer.write(&mut buf)?;
+        let (_, footer_len) = writer.write(&mut buf).await?;
 
         let file_slice = FileSlice::new(Arc::new(OwnedBytes::new(buf)));
         let dir = UnifiedDirectory::open_with_len(file_slice, footer_len as usize)?;
