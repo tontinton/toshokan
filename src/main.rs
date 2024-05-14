@@ -65,7 +65,7 @@ fn index(args: IndexArgs) -> Result<()> {
 
     let _ = create_dir(&args.build_dir);
     let index = Index::open_or_create(MmapDirectory::open(&args.build_dir)?, schema.clone())?;
-    let mut index_writer: IndexWriter = index.writer(50_000_000)?;
+    let mut index_writer: IndexWriter = index.writer(args.memory_budget)?;
 
     let mut reader = BufReader::new(File::open(&args.input_path)?);
 
@@ -104,7 +104,9 @@ fn index(args: IndexArgs) -> Result<()> {
     if args.merge {
         let segment_ids = index.searchable_segment_ids()?;
         info!("Merging {} segments", segment_ids.len());
-        index_writer.merge(&segment_ids).wait()?;
+
+        // Returns Err when a merge is already in progress.
+        let _ = index_writer.merge(&segment_ids).wait();
     }
 
     info!("Joining merging threads");

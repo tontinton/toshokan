@@ -32,6 +32,14 @@ pub struct IndexArgs {
     )]
     pub build_dir: String,
 
+    #[clap(
+        long,
+        help = "Sets the amount of memory allocated for all indexing threads.
+The memory is split evenly between all indexing threads, once a thread reaches its limit a commit is triggered.",
+        default_value = "1073741824"
+    )]
+    pub memory_budget: usize,
+
     #[clap(short, long, help = "Merge all created segments into one segment.")]
     pub merge: bool,
 }
