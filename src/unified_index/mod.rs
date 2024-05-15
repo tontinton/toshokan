@@ -1,4 +1,4 @@
-pub mod directory;
+pub mod unified_directory;
 pub mod utils;
 pub mod writer;
 
@@ -10,6 +10,7 @@ const VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexFooter {
+    cache: HashMap<(PathBuf, Range<u64>), Vec<u8>>,
     file_offsets: HashMap<PathBuf, Range<u64>>,
     version: u32,
 }
@@ -17,6 +18,7 @@ pub struct IndexFooter {
 impl IndexFooter {
     pub fn new(file_offsets: HashMap<PathBuf, Range<u64>>) -> Self {
         Self {
+            cache: HashMap::new(),
             file_offsets,
             version: VERSION,
         }

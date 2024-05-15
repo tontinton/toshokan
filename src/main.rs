@@ -29,7 +29,7 @@ use tokio::{
     task::spawn_blocking,
 };
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
-use unified_index::directory::UnifiedDirectory;
+use unified_index::unified_directory::UnifiedDirectory;
 
 use crate::{
     args::{parse_args, SubCommand},

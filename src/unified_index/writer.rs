@@ -99,7 +99,7 @@ mod tests {
     };
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
-    use crate::unified_index::directory::UnifiedDirectory;
+    use crate::unified_index::unified_directory::UnifiedDirectory;
 
     use super::*;
 
