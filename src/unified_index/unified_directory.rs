@@ -1,15 +1,47 @@
-use std::{path::Path, sync::Arc};
+use std::{ops::Range, path::Path, sync::Arc};
 
 use bincode::Options;
 use color_eyre::eyre::Result;
 use tantivy::{
-    directory::{error::OpenReadError, FileHandle, FileSlice},
-    Directory,
+    directory::{error::OpenReadError, FileHandle, FileSlice, OwnedBytes},
+    Directory, HasLen,
 };
 
 use crate::bincode::bincode_options;
 
-use super::{utils::macros::read_only_directory, IndexFooter};
+use super::{file_cache::RangeCache, utils::macros::read_only_directory, IndexFooter};
+
+#[derive(Debug, Clone)]
+struct CachedFileHandle {
+    raw_file_handle: Arc<dyn FileHandle>,
+    cache: RangeCache,
+}
+
+impl CachedFileHandle {
+    fn new(raw_file_handle: Arc<dyn FileHandle>, cache: RangeCache) -> Self {
+        Self {
+            raw_file_handle,
+            cache,
+        }
+    }
+}
+
+impl FileHandle for CachedFileHandle {
+    fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
+        if let Some((end, bytes)) = self.cache.get(&(range.start as u64)).cloned() {
+            if end == range.end as u64 {
+                return Ok(OwnedBytes::new(bytes));
+            }
+        }
+        self.raw_file_handle.read_bytes(range)
+    }
+}
+
+impl HasLen for CachedFileHandle {
+    fn len(&self) -> usize {
+        self.raw_file_handle.len()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct UnifiedDirectory {
@@ -28,17 +60,17 @@ impl UnifiedDirectory {
 
 impl Directory for UnifiedDirectory {
     fn get_file_handle(&self, path: &Path) -> Result<Arc<dyn FileHandle>, OpenReadError> {
-        let file_slice = self.open_read(path)?;
-        Ok(Arc::new(file_slice))
-    }
-
-    fn open_read(&self, path: &Path) -> Result<FileSlice, OpenReadError> {
         let range = self
             .footer
             .file_offsets
             .get(path)
             .ok_or_else(|| OpenReadError::FileDoesNotExist(path.to_path_buf()))?;
-        Ok(self.slice.slice(range.start as usize..range.end as usize))
+        let slice = self.slice.slice(range.start as usize..range.end as usize);
+        if let Some(cache) = self.footer.cache.get(path).cloned() {
+            Ok(Arc::new(CachedFileHandle::new(Arc::new(slice), cache)))
+        } else {
+            Ok(Arc::new(slice))
+        }
     }
 
     fn atomic_read(&self, path: &Path) -> Result<Vec<u8>, OpenReadError> {

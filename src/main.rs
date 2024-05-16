@@ -3,7 +3,12 @@ mod bincode;
 mod opendal_file_handle;
 mod unified_index;
 
-use std::{collections::HashSet, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use args::{IndexArgs, SearchArgs};
 use color_eyre::eyre::Result;
@@ -34,7 +39,7 @@ use unified_index::unified_directory::UnifiedDirectory;
 use crate::{
     args::{parse_args, SubCommand},
     opendal_file_handle::OpenDalFileHandle,
-    unified_index::writer::UnifiedIndexWriter,
+    unified_index::{file_cache::build_file_cache, writer::UnifiedIndexWriter},
 };
 
 extern crate pretty_env_logger;
@@ -102,6 +107,9 @@ async fn index(args: IndexArgs) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
+    let build_dir_path = PathBuf::from(&args.build_dir);
+    let file_cache = spawn_blocking(move || build_file_cache(&build_dir_path)).await??;
+
     let unified_index_writer = UnifiedIndexWriter::from_file_paths(
         Path::new(&args.build_dir),
         index.directory().list_managed_files(),
@@ -126,7 +134,7 @@ async fn index(args: IndexArgs) -> Result<()> {
         .compat_write();
 
     info!("Writing unified index file");
-    let (total_len, footer_len) = unified_index_writer.write(&mut writer).await?;
+    let (total_len, footer_len) = unified_index_writer.write(&mut writer, file_cache).await?;
     writer.shutdown().await?;
 
     write(

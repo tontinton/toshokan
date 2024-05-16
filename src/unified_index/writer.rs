@@ -14,7 +14,7 @@ use tokio::{
 
 use crate::bincode::bincode_options;
 
-use super::IndexFooter;
+use super::{FileCache, IndexFooter};
 
 struct FileReader {
     reader: Box<dyn AsyncRead + Unpin>,
@@ -58,7 +58,7 @@ impl UnifiedIndexWriter {
         }
     }
 
-    pub async fn write<W>(mut self, writer: &mut W) -> Result<(u64, u64)>
+    pub async fn write<W>(mut self, writer: &mut W, cache: FileCache) -> Result<(u64, u64)>
     where
         W: AsyncWrite + Unpin,
     {
@@ -70,7 +70,8 @@ impl UnifiedIndexWriter {
             self.file_offsets.insert(file_name, start..written);
         }
 
-        let footer_bytes = bincode_options().serialize(&IndexFooter::new(self.file_offsets))?;
+        let footer_bytes =
+            bincode_options().serialize(&IndexFooter::new(self.file_offsets, cache))?;
         let footer_len = footer_bytes.len() as u64;
 
         let footer_written = tokio::io::copy(&mut Cursor::new(footer_bytes), writer).await?;
@@ -83,6 +84,16 @@ impl UnifiedIndexWriter {
         }
 
         Ok((written + footer_len, footer_len))
+    }
+
+    #[cfg(test)]
+    pub async fn write_without_cache<W>(self, writer: &mut W) -> Result<(u64, u64)>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        use std::collections::BTreeMap;
+
+        self.write(writer, BTreeMap::new()).await
     }
 }
 
@@ -119,7 +130,7 @@ mod tests {
         ]);
 
         let mut buf = vec![];
-        let (_, footer_len) = writer.write(&mut buf).await?;
+        let (_, footer_len) = writer.write_without_cache(&mut buf).await?;
 
         let file_slice = FileSlice::new(Arc::new(OwnedBytes::new(buf)));
         let dir = UnifiedDirectory::open_with_len(file_slice, footer_len as usize)?;
