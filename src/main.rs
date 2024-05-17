@@ -70,7 +70,6 @@ async fn index(args: IndexArgs) -> Result<()> {
     let mut reader = BufReader::new(File::open(&args.input_path).await?);
 
     let mut line = String::new();
-    let mut i = 0;
     let mut added = 0;
 
     loop {
@@ -91,14 +90,9 @@ async fn index(args: IndexArgs) -> Result<()> {
         }
 
         line.clear();
-
-        i += 1;
-        if i % 1000 == 0 {
-            debug!("{i}");
-        }
     }
 
-    info!("Commiting {added} documents, after processing {i}");
+    info!("Commiting {added} documents");
     index_writer.prepare_commit()?.commit_future().await?;
 
     let segment_ids = index.searchable_segment_ids()?;
