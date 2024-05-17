@@ -102,8 +102,10 @@ async fn index(args: IndexArgs) -> Result<()> {
     index_writer.prepare_commit()?.commit_future().await?;
 
     let segment_ids = index.searchable_segment_ids()?;
-    info!("Merging {} segments", segment_ids.len());
-    index_writer.merge(&segment_ids).await?;
+    if segment_ids.len() > 1 {
+        info!("Merging {} segments", segment_ids.len());
+        index_writer.merge(&segment_ids).await?;
+    }
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
