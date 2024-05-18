@@ -12,6 +12,9 @@ pub enum SubCommand {
     #[clap(name = "index")]
     Index(IndexArgs),
 
+    #[clap(name = "merge")]
+    Merge(MergeArgs),
+
     #[clap(name = "search")]
     Search(SearchArgs),
 }
@@ -39,6 +42,20 @@ The memory is split evenly between all indexing threads, once a thread reaches i
         default_value = "1073741824"
     )]
     pub memory_budget: usize,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct MergeArgs {
+    #[clap(help = "Path to the index dir.")]
+    pub index_dir: String,
+
+    #[clap(
+        short,
+        long,
+        help = "Path to the dir to merge in the inverted indexes.",
+        default_value = "/tmp/toshokan_merge"
+    )]
+    pub merge_dir: String,
 }
 
 #[derive(Parser, Debug, Clone)]

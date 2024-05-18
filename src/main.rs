@@ -1,5 +1,6 @@
 mod args;
 mod bincode;
+mod merge_directory;
 mod opendal_file_handle;
 mod unified_index;
 
@@ -10,14 +11,14 @@ use std::{
     time::Duration,
 };
 
-use args::{IndexArgs, SearchArgs};
+use args::{IndexArgs, MergeArgs, SearchArgs};
 use color_eyre::eyre::Result;
 use futures::future::{try_join, try_join_all};
 use opendal::{layers::LoggingLayer, BlockingOperator, Operator};
 use pretty_env_logger::formatted_timed_builder;
 use tantivy::{
     collector::TopDocs,
-    directory::{FileSlice, MmapDirectory},
+    directory::{DirectoryClone, FileSlice, MmapDirectory},
     indexer::NoMergePolicy,
     query::QueryParser,
     schema::{
@@ -38,6 +39,7 @@ use unified_index::unified_directory::UnifiedDirectory;
 
 use crate::{
     args::{parse_args, SubCommand},
+    merge_directory::MergeDirectory,
     opendal_file_handle::OpenDalFileHandle,
     unified_index::{file_cache::build_file_cache, writer::UnifiedIndexWriter},
 };
@@ -205,6 +207,33 @@ async fn index(args: IndexArgs) -> Result<()> {
     Ok(())
 }
 
+async fn merge(args: MergeArgs) -> Result<()> {
+    let _ = create_dir(&args.merge_dir).await;
+    let output_dir = MmapDirectory::open(&args.merge_dir)?;
+
+    let directories = open_unified_directories(&args.index_dir)
+        .await?
+        .into_iter()
+        .map(|x| x.box_clone())
+        .collect::<Vec<_>>();
+
+    let index = Index::open(MergeDirectory::new(directories, output_dir.box_clone())?)?;
+    let mut index_writer: IndexWriter = index.writer_with_num_threads(1, 15_000_000)?;
+    index_writer.set_merge_policy(Box::new(NoMergePolicy));
+
+    let segment_ids = index.searchable_segment_ids()?;
+    if segment_ids.len() > 1 {
+        info!("Merging {} segments", segment_ids.len());
+        index_writer.merge(&segment_ids).await?;
+    }
+
+    spawn_blocking(move || index_writer.wait_merging_threads()).await??;
+
+    write_unified_index(index, &args.merge_dir, &args.index_dir).await?;
+
+    Ok(())
+}
+
 async fn search(args: SearchArgs) -> Result<()> {
     if args.limit == 0 {
         return Ok(());
@@ -293,6 +322,9 @@ async fn async_main() -> Result<()> {
     match args.subcmd {
         SubCommand::Index(index_args) => {
             index(index_args).await?;
+        }
+        SubCommand::Merge(merge_args) => {
+            merge(merge_args).await?;
         }
         SubCommand::Search(search_args) => {
             search(search_args).await?;
