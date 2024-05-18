@@ -49,6 +49,57 @@ extern crate log;
 const DEFAULT_DEBUG_LOG_LEVEL: &str = "toshokan=trace,opendal::services=info";
 const DEFAULT_RELEASE_LOG_LEVEL: &str = "toshokan=info,opendal::services=info";
 
+async fn open_unified_directories(index_dir: &str) -> Result<Vec<UnifiedDirectory>> {
+    let mut index_ids = HashSet::new();
+    let mut dir_reader = read_dir(index_dir).await?;
+    while let Some(entry) = dir_reader.next_entry().await? {
+        if let Some(filename) = entry.file_name().to_str() {
+            index_ids.insert(
+                filename
+                    .chars()
+                    .take_while(|&c| c != '.')
+                    .collect::<String>(),
+            );
+        }
+    }
+
+    let mut builder = opendal::services::Fs::default();
+    builder.root(index_dir);
+
+    let op = Operator::new(builder)?
+        .layer(LoggingLayer::default())
+        .finish();
+
+    let mut directories_args = Vec::with_capacity(index_ids.len());
+    for id in index_ids {
+        let index_filename = format!("{}.index", id);
+        let reader = op.reader_with(&index_filename).await?;
+        let file_slice = FileSlice::new(Arc::new(
+            OpenDalFileHandle::from_path(&Path::new(index_dir).join(&index_filename), reader)
+                .await?,
+        ));
+
+        let footer_len = read_to_string(&Path::new(index_dir).join(&format!("{}.footer", id)))
+            .await?
+            .parse::<u64>()?;
+
+        directories_args.push((file_slice, footer_len))
+    }
+
+    let results = try_join_all(
+        directories_args
+            .into_iter()
+            .map(|(file_slice, footer_len)| {
+                spawn_blocking(move || -> Result<UnifiedDirectory> {
+                    UnifiedDirectory::open_with_len(file_slice, footer_len as usize)
+                })
+            }),
+    )
+    .await?;
+
+    results.into_iter().collect::<Result<_>>()
+}
+
 async fn index(args: IndexArgs) -> Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
@@ -152,48 +203,13 @@ async fn search(args: SearchArgs) -> Result<()> {
         return Ok(());
     }
 
-    let mut index_ids = HashSet::new();
-    let mut dir_reader = read_dir(&args.index_dir).await?;
-    while let Some(entry) = dir_reader.next_entry().await? {
-        if let Some(filename) = entry.file_name().to_str() {
-            index_ids.insert(
-                filename
-                    .chars()
-                    .take_while(|&c| c != '.')
-                    .collect::<String>(),
-            );
-        }
-    }
-
-    let mut builder = opendal::services::Fs::default();
-    builder.root(&args.index_dir);
-
-    let op = Operator::new(builder)?
-        .layer(LoggingLayer::default())
-        .finish();
-
-    let mut indexes_args = Vec::with_capacity(index_ids.len());
-    for id in index_ids {
-        let index_filename = format!("{}.index", id);
-        let reader = op.reader_with(&index_filename).await?;
-        let file_slice = FileSlice::new(Arc::new(
-            OpenDalFileHandle::from_path(&Path::new(&args.index_dir).join(&index_filename), reader)
-                .await?,
-        ));
-
-        let footer_len =
-            read_to_string(&Path::new(&args.index_dir).join(&format!("{}.footer", id)))
-                .await?
-                .parse::<u64>()?;
-
-        indexes_args.push((file_slice, footer_len));
-    }
+    let directories = open_unified_directories(&args.index_dir).await?;
 
     let (tx, mut rx) = channel(args.limit);
-    let mut tx_handles = Vec::with_capacity(indexes_args.len());
+    let mut tx_handles = Vec::with_capacity(directories.len());
 
     // Should be chunked to never starve the thread pool (default in tokio is 500 threads).
-    for (file_slice, footer_len) in indexes_args {
+    for directory in directories {
         let tx = tx.clone();
         let query = args.query.clone();
 
@@ -203,11 +219,7 @@ async fn search(args: SearchArgs) -> Result<()> {
                 return Ok(());
             }
 
-            let index = Index::open(UnifiedDirectory::open_with_len(
-                file_slice,
-                footer_len as usize,
-            )?)?;
-
+            let index = Index::open(directory)?;
             let schema = index.schema();
 
             let dynamic_field = schema.get_field("_dynamic")?;
