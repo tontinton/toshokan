@@ -1,6 +1,6 @@
 use std::{ops::Range, path::Path};
 
-use opendal::Reader;
+use opendal::BlockingReader;
 use tantivy::{
     directory::{FileHandle, OwnedBytes},
     HasLen,
@@ -9,16 +9,16 @@ use tokio::fs::metadata;
 
 pub struct OpenDalFileHandle {
     size: u64,
-    reader: Reader,
+    reader: BlockingReader,
 }
 
 impl OpenDalFileHandle {
-    pub async fn from_path(path: &Path, reader: Reader) -> std::io::Result<Self> {
+    pub async fn from_path(path: &Path, reader: BlockingReader) -> std::io::Result<Self> {
         let size = metadata(path).await?.len();
         Ok(Self::new(size, reader))
     }
 
-    fn new(size: u64, reader: Reader) -> Self {
+    fn new(size: u64, reader: BlockingReader) -> Self {
         Self { size, reader }
     }
 }
@@ -32,12 +32,8 @@ impl std::fmt::Debug for OpenDalFileHandle {
 impl FileHandle for OpenDalFileHandle {
     fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
         let mut bytes = Vec::new();
-        let fut = self
-            .reader
-            .read_into(&mut bytes, range.start as u64..range.end as u64);
-        tokio::runtime::Handle::current()
-            .block_on(fut)
-            .map_err(Into::<std::io::Error>::into)?;
+        self.reader
+            .read_into(&mut bytes, range.start as u64..range.end as u64)?;
         Ok(OwnedBytes::new(bytes))
     }
 }
@@ -67,12 +63,12 @@ mod tests {
         let mut builder = opendal::services::Fs::default();
         builder.root(path.parent().unwrap().to_str().unwrap());
 
-        let op = Operator::new(builder)?.finish();
+        let op = Operator::new(builder)?.finish().blocking();
 
         let reader = OpenDalFileHandle::from_path(
             &path,
             op.reader_with(&path.file_name().unwrap().to_str().unwrap())
-                .await?,
+                .call()?,
         )
         .await?;
 
