@@ -216,6 +216,10 @@ async fn merge(args: MergeArgs) -> Result<()> {
         .into_iter()
         .map(|x| x.box_clone())
         .collect::<Vec<_>>();
+    if directories.len() <= 1 {
+        info!("Need at least 2 files in index directory to be able to merge");
+        return Ok(());
+    }
 
     let index = Index::open(MergeDirectory::new(directories, output_dir.box_clone())?)?;
     let mut index_writer: IndexWriter = index.writer_with_num_threads(1, 15_000_000)?;
