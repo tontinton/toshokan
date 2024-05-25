@@ -42,7 +42,7 @@ impl MergeDirectory {
         let meta_dir = Box::new(RamDirectory::create());
         meta_dir.atomic_write(
             Path::new("meta.json"),
-            serde_json::to_string_pretty(&meta)?.as_bytes(),
+            serde_json::to_string(&meta)?.as_bytes(),
         )?;
 
         // Always read the output dir and combined meta dir before any of the input dir meta files.
