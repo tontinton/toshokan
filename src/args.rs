@@ -3,6 +3,21 @@ use clap::Parser;
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
+    #[clap(
+        short,
+        long,
+        help = "Path to the index dir.",
+        default_value = "/tmp/toshokan"
+    )]
+    pub index_dir: String,
+
+    #[clap(
+        long,
+        help = "Postgres DB connection url.
+Can also be provided by a DATABASE_URL env var, but only if this arg is not provided."
+    )]
+    pub db: Option<String>,
+
     #[clap(subcommand)]
     pub subcmd: SubCommand,
 }
@@ -24,14 +39,11 @@ pub struct IndexArgs {
     #[clap(help = "Path to the input jsonl file you want to index.")]
     pub input_path: String,
 
-    #[clap(help = "Path to the index dir.")]
-    pub index_dir: String,
-
     #[clap(
         short,
         long,
         help = "Path to the dir to build in the inverted indexes.",
-        default_value = "/tmp/toshokan"
+        default_value = "/tmp/toshokan_build"
     )]
     pub build_dir: String,
 
@@ -46,9 +58,6 @@ The memory is split evenly between all indexing threads, once a thread reaches i
 
 #[derive(Parser, Debug, Clone)]
 pub struct MergeArgs {
-    #[clap(help = "Path to the index dir.")]
-    pub index_dir: String,
-
     #[clap(
         short,
         long,
@@ -60,9 +69,6 @@ pub struct MergeArgs {
 
 #[derive(Parser, Debug, Clone)]
 pub struct SearchArgs {
-    #[clap(help = "Path to the index dir.")]
-    pub index_dir: String,
-
     #[clap(help = "Query in tantivy syntax.")]
     pub query: String,
 

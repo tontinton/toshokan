@@ -5,7 +5,6 @@ mod opendal_file_handle;
 mod unified_index;
 
 use std::{
-    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -13,9 +12,11 @@ use std::{
 
 use args::{IndexArgs, MergeArgs, SearchArgs};
 use color_eyre::eyre::Result;
+use dotenvy::dotenv;
 use futures::future::{try_join, try_join_all};
 use opendal::{layers::LoggingLayer, BlockingOperator, Operator};
 use pretty_env_logger::formatted_timed_builder;
+use sqlx::{postgres::PgPoolOptions, query, PgPool};
 use tantivy::{
     collector::TopDocs,
     directory::{DirectoryClone, FileSlice, MmapDirectory},
@@ -27,7 +28,7 @@ use tantivy::{
     DateTime, Document, Index, IndexWriter, ReloadPolicy, TantivyDocument,
 };
 use tokio::{
-    fs::{create_dir, read_dir, read_to_string, write, File},
+    fs::{create_dir, create_dir_all, remove_file, File},
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     runtime::Builder,
     spawn,
@@ -51,19 +52,15 @@ extern crate log;
 const DEFAULT_DEBUG_LOG_LEVEL: &str = "toshokan=trace,opendal::services=info";
 const DEFAULT_RELEASE_LOG_LEVEL: &str = "toshokan=info,opendal::services=info";
 
-async fn open_unified_directories(index_dir: &str) -> Result<Vec<UnifiedDirectory>> {
-    let mut index_ids = HashSet::new();
-    let mut dir_reader = read_dir(index_dir).await?;
-    while let Some(entry) = dir_reader.next_entry().await? {
-        if let Some(filename) = entry.file_name().to_str() {
-            index_ids.insert(
-                filename
-                    .chars()
-                    .take_while(|&c| c != '.')
-                    .collect::<String>(),
-            );
-        }
-    }
+const MAX_DB_CONNECTIONS: u32 = 100;
+
+async fn open_unified_directories(
+    index_dir: &str,
+    pool: &PgPool,
+) -> Result<Vec<(String, UnifiedDirectory)>> {
+    let items = query!("SELECT id, file_name, footer_len FROM indexes")
+        .fetch_all(pool)
+        .await?;
 
     let mut builder = opendal::services::Fs::default();
     builder.root(index_dir);
@@ -73,28 +70,26 @@ async fn open_unified_directories(index_dir: &str) -> Result<Vec<UnifiedDirector
         .finish()
         .blocking();
 
-    let mut directories_args = Vec::with_capacity(index_ids.len());
-    for id in index_ids {
-        let index_filename = format!("{}.index", id);
-        let reader = op.reader_with(&index_filename).call()?;
+    let mut directories_args = Vec::with_capacity(items.len());
+    for item in items {
+        let reader = op.reader_with(&item.file_name).call()?;
         let file_slice = FileSlice::new(Arc::new(
-            OpenDalFileHandle::from_path(&Path::new(index_dir).join(&index_filename), reader)
+            OpenDalFileHandle::from_path(&Path::new(index_dir).join(&item.file_name), reader)
                 .await?,
         ));
 
-        let footer_len = read_to_string(&Path::new(index_dir).join(&format!("{}.footer", id)))
-            .await?
-            .parse::<u64>()?;
-
-        directories_args.push((file_slice, footer_len))
+        directories_args.push((item.id, file_slice, item.footer_len))
     }
 
     let results = try_join_all(
         directories_args
             .into_iter()
-            .map(|(file_slice, footer_len)| {
-                spawn_blocking(move || -> Result<UnifiedDirectory> {
-                    UnifiedDirectory::open_with_len(file_slice, footer_len as usize)
+            .map(|(id, file_slice, footer_len)| {
+                spawn_blocking(move || -> Result<(String, UnifiedDirectory)> {
+                    Ok((
+                        id,
+                        UnifiedDirectory::open_with_len(file_slice, footer_len as usize)?,
+                    ))
                 })
             }),
     )
@@ -103,9 +98,14 @@ async fn open_unified_directories(index_dir: &str) -> Result<Vec<UnifiedDirector
     results.into_iter().collect::<Result<_>>()
 }
 
-async fn write_unified_index(index: Index, input_dir: &str, output_dir: &str) -> Result<()> {
-    let build_dir_path = PathBuf::from(input_dir);
-    let file_cache = spawn_blocking(move || build_file_cache(&build_dir_path)).await??;
+async fn write_unified_index(
+    index: Index,
+    input_dir: &str,
+    output_dir: &str,
+    pool: &PgPool,
+) -> Result<()> {
+    let cloned_input_dir = PathBuf::from(input_dir);
+    let file_cache = spawn_blocking(move || build_file_cache(&cloned_input_dir)).await??;
 
     let unified_index_writer = UnifiedIndexWriter::from_file_paths(
         Path::new(input_dir),
@@ -121,8 +121,9 @@ async fn write_unified_index(index: Index, input_dir: &str, output_dir: &str) ->
         .finish();
 
     let id = uuid::Uuid::now_v7();
+    let file_name = format!("{}.index", id);
     let mut writer = op
-        .writer_with(&format!("{}.index", id))
+        .writer_with(&file_name)
         .content_type("application/octet-stream")
         .chunk(5_000_000)
         .await?
@@ -134,11 +135,12 @@ async fn write_unified_index(index: Index, input_dir: &str, output_dir: &str) ->
     let (total_len, footer_len) = unified_index_writer.write(&mut writer, file_cache).await?;
     writer.shutdown().await?;
 
-    write(
-        Path::new(output_dir).join(format!("{}.footer", id)),
-        footer_len.to_string(),
-    )
-    .await?;
+    query("INSERT INTO indexes (id, file_name, footer_len) VALUES ($1, $2, $3)")
+        .bind(&id.to_string())
+        .bind(&file_name)
+        .bind(footer_len as i64)
+        .execute(pool)
+        .await?;
 
     debug!(
         "Index file length: {}. Footer length: {}",
@@ -148,7 +150,7 @@ async fn write_unified_index(index: Index, input_dir: &str, output_dir: &str) ->
     Ok(())
 }
 
-async fn index(args: IndexArgs) -> Result<()> {
+async fn index(args: IndexArgs, pool: PgPool, index_dir: &str) -> Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
@@ -161,7 +163,7 @@ async fn index(args: IndexArgs) -> Result<()> {
 
     let schema = schema_builder.build();
 
-    let _ = create_dir(&args.build_dir).await;
+    let _ = create_dir_all(&args.build_dir).await;
     let index = Index::open_or_create(MmapDirectory::open(&args.build_dir)?, schema.clone())?;
     let mut index_writer: IndexWriter = index.writer(args.memory_budget)?;
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
@@ -202,24 +204,25 @@ async fn index(args: IndexArgs) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.build_dir, &args.index_dir).await?;
+    write_unified_index(index, &args.build_dir, index_dir, &pool).await?;
 
     Ok(())
 }
 
-async fn merge(args: MergeArgs) -> Result<()> {
-    let _ = create_dir(&args.merge_dir).await;
-    let output_dir = MmapDirectory::open(&args.merge_dir)?;
-
-    let directories = open_unified_directories(&args.index_dir)
+async fn merge(args: MergeArgs, pool: PgPool, index_dir: &str) -> Result<()> {
+    let (ids, directories): (Vec<_>, Vec<_>) = open_unified_directories(index_dir, &pool)
         .await?
         .into_iter()
-        .map(|x| x.box_clone())
-        .collect::<Vec<_>>();
+        .map(|(id, dir)| (id, dir.box_clone()))
+        .unzip();
+
     if directories.len() <= 1 {
         info!("Need at least 2 files in index directory to be able to merge");
         return Ok(());
     }
+
+    let _ = create_dir(&args.merge_dir).await;
+    let output_dir = MmapDirectory::open(&args.merge_dir)?;
 
     let index = Index::open(MergeDirectory::new(directories, output_dir.box_clone())?)?;
     let mut index_writer: IndexWriter = index.writer_with_num_threads(1, 15_000_000)?;
@@ -233,17 +236,32 @@ async fn merge(args: MergeArgs) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.merge_dir, &args.index_dir).await?;
+    write_unified_index(index, &args.merge_dir, index_dir, &pool).await?;
+
+    let delete_result = query("DELETE FROM indexes WHERE id = ANY($1)")
+        .bind(&ids)
+        .execute(&pool)
+        .await;
+
+    for id in ids {
+        let _ = remove_file(
+            Path::new(index_dir)
+                .join(format!("{}.index", id))
+                .to_str()
+                .expect("failed to build index path"),
+        )
+        .await;
+    }
+
+    delete_result?;
 
     Ok(())
 }
 
-async fn search(args: SearchArgs) -> Result<()> {
+async fn search(args: SearchArgs, directories: Vec<UnifiedDirectory>) -> Result<()> {
     if args.limit == 0 {
         return Ok(());
     }
-
-    let directories = open_unified_directories(&args.index_dir).await?;
 
     let (tx, mut rx) = channel(args.limit);
     let mut tx_handles = Vec::with_capacity(directories.len());
@@ -307,8 +325,18 @@ async fn search(args: SearchArgs) -> Result<()> {
     Ok(())
 }
 
+async fn open_db_pool(url: &str) -> Result<PgPool> {
+    Ok(PgPoolOptions::new()
+        .max_connections(MAX_DB_CONNECTIONS)
+        .connect(url)
+        .await?)
+}
+
 async fn async_main() -> Result<()> {
     color_eyre::install()?;
+
+    // Load vars inside .env into env vars, does nothing if the file does not exist.
+    let _ = dotenv();
 
     let default_log_level = if cfg!(debug_assertions) {
         DEFAULT_DEBUG_LOG_LEVEL
@@ -323,15 +351,27 @@ async fn async_main() -> Result<()> {
     log_builder.try_init()?;
 
     let args = parse_args();
+
+    let pool = open_db_pool(&args.db.unwrap_or_else(|| {
+        std::env::var("DATABASE_URL")
+            .expect("database url must be provided using either --db or DATABASE_URL env var")
+    }))
+    .await?;
+
     match args.subcmd {
         SubCommand::Index(index_args) => {
-            index(index_args).await?;
+            index(index_args, pool, &args.index_dir).await?;
         }
         SubCommand::Merge(merge_args) => {
-            merge(merge_args).await?;
+            merge(merge_args, pool, &args.index_dir).await?;
         }
         SubCommand::Search(search_args) => {
-            search(search_args).await?;
+            let directories = open_unified_directories(&args.index_dir, &pool)
+                .await?
+                .into_iter()
+                .map(|(_, x)| x)
+                .collect::<Vec<_>>();
+            search(search_args, directories).await?;
         }
     }
 
@@ -341,6 +381,7 @@ async fn async_main() -> Result<()> {
 fn main() -> Result<()> {
     let runtime = Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_secs(20))
+        .enable_all()
         .build()?;
     runtime.block_on(async_main())
 }
