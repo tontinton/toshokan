@@ -58,7 +58,7 @@ async fn open_unified_directories(
     index_dir: &str,
     pool: &PgPool,
 ) -> Result<Vec<(String, UnifiedDirectory)>> {
-    let items = query!("SELECT id, file_name, footer_len FROM indexes")
+    let items = query!("SELECT id, file_name, footer_len FROM index_files")
         .fetch_all(pool)
         .await?;
 
@@ -135,7 +135,7 @@ async fn write_unified_index(
     let (total_len, footer_len) = unified_index_writer.write(&mut writer, file_cache).await?;
     writer.shutdown().await?;
 
-    query("INSERT INTO indexes (id, file_name, footer_len) VALUES ($1, $2, $3)")
+    query("INSERT INTO index_files (id, file_name, footer_len) VALUES ($1, $2, $3)")
         .bind(&id.to_string())
         .bind(&file_name)
         .bind(footer_len as i64)
@@ -238,7 +238,7 @@ async fn merge(args: MergeArgs, pool: PgPool, index_dir: &str) -> Result<()> {
 
     write_unified_index(index, &args.merge_dir, index_dir, &pool).await?;
 
-    let delete_result = query("DELETE FROM indexes WHERE id = ANY($1)")
+    let delete_result = query("DELETE FROM index_files WHERE id = ANY($1)")
         .bind(&ids)
         .execute(&pool)
         .await;

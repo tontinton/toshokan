@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, file_name, footer_len FROM indexes",
+  "query": "SELECT id, file_name, footer_len FROM index_files",
   "describe": {
     "columns": [
       {
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "01c21a2c5f1799c72bd2ef9c7ecc429fa08f1f2d988f5df839783df0b4321d2c"
+  "hash": "1e6cc5b9e8215920d475181c9589127308d92f38f6851b20468b9a2adc77b535"
 }
