@@ -19,6 +19,9 @@ pub enum SubCommand {
     #[clap(name = "create")]
     Create(CreateArgs),
 
+    #[clap(name = "drop")]
+    Drop(DropArgs),
+
     #[clap(name = "index")]
     Index(IndexArgs),
 
@@ -33,6 +36,12 @@ pub enum SubCommand {
 pub struct CreateArgs {
     #[clap(help = "Path to the input config file.")]
     pub config_path: String,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct DropArgs {
+    #[clap(help = "The index name.")]
+    pub name: String,
 }
 
 #[derive(Parser, Debug, Clone)]

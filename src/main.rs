@@ -11,8 +11,8 @@ use std::{
     time::Duration,
 };
 
-use args::{CreateArgs, IndexArgs, MergeArgs, SearchArgs};
-use color_eyre::eyre::Result;
+use args::{CreateArgs, DropArgs, IndexArgs, MergeArgs, SearchArgs};
+use color_eyre::eyre::{eyre, Result};
 use dotenvy::dotenv;
 use futures::future::{try_join, try_join_all};
 use index_config::IndexConfig;
@@ -172,7 +172,7 @@ async fn write_unified_index(
     Ok(())
 }
 
-async fn create(args: CreateArgs, pool: PgPool) -> Result<()> {
+async fn run_create(args: CreateArgs, pool: PgPool) -> Result<()> {
     let config = IndexConfig::from_path(&args.config_path).await?;
 
     query("INSERT INTO indexes (name, config) VALUES ($1, $2)")
@@ -184,7 +184,31 @@ async fn create(args: CreateArgs, pool: PgPool) -> Result<()> {
     Ok(())
 }
 
-async fn index(args: IndexArgs, pool: PgPool, config: &IndexConfig) -> Result<()> {
+async fn run_drop(args: DropArgs, pool: PgPool, base_path: &str) -> Result<()> {
+    let file_names: Vec<(String,)> =
+        query_as("SELECT file_name FROM index_files WHERE index_name=$1")
+            .bind(&args.name)
+            .fetch_all(&pool)
+            .await?;
+
+    for (file_name,) in file_names {
+        let _ = remove_file(
+            Path::new(base_path)
+                .join(file_name)
+                .to_str()
+                .ok_or_else(|| eyre!("failed to build index file path"))?,
+        )
+        .await;
+    }
+
+    query("DELETE FROM indexes WHERE name=$1")
+        .bind(&args.name)
+        .execute(&pool)
+        .await?;
+    Ok(())
+}
+
+async fn run_index(args: IndexArgs, pool: PgPool, config: &IndexConfig) -> Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
@@ -243,7 +267,7 @@ async fn index(args: IndexArgs, pool: PgPool, config: &IndexConfig) -> Result<()
     Ok(())
 }
 
-async fn merge(args: MergeArgs, pool: PgPool, config: &IndexConfig) -> Result<()> {
+async fn run_merge(args: MergeArgs, pool: PgPool, config: &IndexConfig) -> Result<()> {
     let (ids, directories): (Vec<_>, Vec<_>) = open_unified_directories(&config.path, &pool)
         .await?
         .into_iter()
@@ -292,7 +316,7 @@ async fn merge(args: MergeArgs, pool: PgPool, config: &IndexConfig) -> Result<()
     Ok(())
 }
 
-async fn search(args: SearchArgs, directories: Vec<UnifiedDirectory>) -> Result<()> {
+async fn run_search(args: SearchArgs, directories: Vec<UnifiedDirectory>) -> Result<()> {
     if args.limit == 0 {
         return Ok(());
     }
@@ -394,15 +418,19 @@ async fn async_main() -> Result<()> {
 
     match args.subcmd {
         SubCommand::Create(create_args) => {
-            create(create_args, pool).await?;
+            run_create(create_args, pool).await?;
+        }
+        SubCommand::Drop(drop_args) => {
+            let path = get_index_path(&drop_args.name, &pool).await?;
+            run_drop(drop_args, pool, &path).await?;
         }
         SubCommand::Index(index_args) => {
             let config = get_index_config(&index_args.name, &pool).await?;
-            index(index_args, pool, &config).await?;
+            run_index(index_args, pool, &config).await?;
         }
         SubCommand::Merge(merge_args) => {
             let config = get_index_config(&merge_args.name, &pool).await?;
-            merge(merge_args, pool, &config).await?;
+            run_merge(merge_args, pool, &config).await?;
         }
         SubCommand::Search(search_args) => {
             let path = get_index_path(&search_args.name, &pool).await?;
@@ -412,7 +440,7 @@ async fn async_main() -> Result<()> {
                 .map(|(_, x)| x)
                 .collect::<Vec<_>>();
             drop(pool);
-            search(search_args, directories).await?;
+            run_search(search_args, directories).await?;
         }
     }
 
