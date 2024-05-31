@@ -4,14 +4,6 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[clap(
-        short,
-        long,
-        help = "Path to the index dir.",
-        default_value = "/tmp/toshokan"
-    )]
-    pub index_dir: String,
-
-    #[clap(
         long,
         help = "Postgres DB connection url.
 Can also be provided by a DATABASE_URL env var, but only if this arg is not provided."
@@ -24,6 +16,9 @@ Can also be provided by a DATABASE_URL env var, but only if this arg is not prov
 
 #[derive(Parser, Debug, Clone)]
 pub enum SubCommand {
+    #[clap(name = "create")]
+    Create(CreateArgs),
+
     #[clap(name = "index")]
     Index(IndexArgs),
 
@@ -35,7 +30,16 @@ pub enum SubCommand {
 }
 
 #[derive(Parser, Debug, Clone)]
+pub struct CreateArgs {
+    #[clap(help = "Path to the input config file.")]
+    pub config_path: String,
+}
+
+#[derive(Parser, Debug, Clone)]
 pub struct IndexArgs {
+    #[clap(help = "The index name.")]
+    pub name: String,
+
     #[clap(help = "Path to the input jsonl file you want to index.")]
     pub input_path: String,
 
@@ -58,6 +62,9 @@ The memory is split evenly between all indexing threads, once a thread reaches i
 
 #[derive(Parser, Debug, Clone)]
 pub struct MergeArgs {
+    #[clap(help = "The index name.")]
+    pub name: String,
+
     #[clap(
         short,
         long,
@@ -69,6 +76,9 @@ pub struct MergeArgs {
 
 #[derive(Parser, Debug, Clone)]
 pub struct SearchArgs {
+    #[clap(help = "The index name.")]
+    pub name: String,
+
     #[clap(help = "Query in tantivy syntax.")]
     pub query: String,
 
