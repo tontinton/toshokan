@@ -1,0 +1,10 @@
+version: 1
+name: test
+path: /tmp/toshokan
+schema:
+  time_field: timestamp
+  mappings:
+    timestamp:
+      type: !datetime
+      formats:
+        - timestamp

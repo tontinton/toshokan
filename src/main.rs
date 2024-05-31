@@ -1,5 +1,6 @@
 mod args;
 mod bincode;
+mod index_config;
 mod merge_directory;
 mod opendal_file_handle;
 mod unified_index;
@@ -10,13 +11,14 @@ use std::{
     time::Duration,
 };
 
-use args::{IndexArgs, MergeArgs, SearchArgs};
+use args::{CreateArgs, IndexArgs, MergeArgs, SearchArgs};
 use color_eyre::eyre::Result;
 use dotenvy::dotenv;
 use futures::future::{try_join, try_join_all};
+use index_config::IndexConfig;
 use opendal::{layers::LoggingLayer, BlockingOperator, Operator};
 use pretty_env_logger::formatted_timed_builder;
-use sqlx::{postgres::PgPoolOptions, query, PgPool};
+use sqlx::{postgres::PgPoolOptions, query, query_as, PgPool};
 use tantivy::{
     collector::TopDocs,
     directory::{DirectoryClone, FileSlice, MmapDirectory},
@@ -53,6 +55,23 @@ const DEFAULT_DEBUG_LOG_LEVEL: &str = "toshokan=trace,opendal::services=info";
 const DEFAULT_RELEASE_LOG_LEVEL: &str = "toshokan=info,opendal::services=info";
 
 const MAX_DB_CONNECTIONS: u32 = 100;
+
+async fn get_index_config(name: &str, pool: &PgPool) -> Result<IndexConfig> {
+    let (value,): (serde_json::Value,) = query_as("SELECT config FROM indexes WHERE name=$1")
+        .bind(name)
+        .fetch_one(pool)
+        .await?;
+    Ok(serde_json::from_value(value)?)
+}
+
+async fn get_index_path(name: &str, pool: &PgPool) -> Result<String> {
+    let (value,): (serde_json::Value,) =
+        query_as("SELECT config->'path' FROM indexes WHERE name=$1")
+            .bind(name)
+            .fetch_one(pool)
+            .await?;
+    Ok(serde_json::from_value(value)?)
+}
 
 async fn open_unified_directories(
     index_dir: &str,
@@ -101,7 +120,7 @@ async fn open_unified_directories(
 async fn write_unified_index(
     index: Index,
     input_dir: &str,
-    output_dir: &str,
+    config: &IndexConfig,
     pool: &PgPool,
 ) -> Result<()> {
     let cloned_input_dir = PathBuf::from(input_dir);
@@ -114,7 +133,7 @@ async fn write_unified_index(
     .await?;
 
     let mut builder = opendal::services::Fs::default();
-    builder.root(output_dir);
+    builder.root(&config.path);
 
     let op = Operator::new(builder)?
         .layer(LoggingLayer::default())
@@ -135,12 +154,15 @@ async fn write_unified_index(
     let (total_len, footer_len) = unified_index_writer.write(&mut writer, file_cache).await?;
     writer.shutdown().await?;
 
-    query("INSERT INTO index_files (id, file_name, footer_len) VALUES ($1, $2, $3)")
-        .bind(&id.to_string())
-        .bind(&file_name)
-        .bind(footer_len as i64)
-        .execute(pool)
-        .await?;
+    query(
+        "INSERT INTO index_files (id, index_name, file_name, footer_len) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(&id.to_string())
+    .bind(&config.name)
+    .bind(&file_name)
+    .bind(footer_len as i64)
+    .execute(pool)
+    .await?;
 
     debug!(
         "Index file length: {}. Footer length: {}",
@@ -150,7 +172,19 @@ async fn write_unified_index(
     Ok(())
 }
 
-async fn index(args: IndexArgs, pool: PgPool, index_dir: &str) -> Result<()> {
+async fn create(args: CreateArgs, pool: PgPool) -> Result<()> {
+    let config = IndexConfig::from_path(&args.config_path).await?;
+
+    query("INSERT INTO indexes (name, config) VALUES ($1, $2)")
+        .bind(&config.name)
+        .bind(&serde_json::to_value(&config)?)
+        .execute(&pool)
+        .await?;
+
+    Ok(())
+}
+
+async fn index(args: IndexArgs, pool: PgPool, config: &IndexConfig) -> Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
         "_dynamic",
@@ -204,13 +238,13 @@ async fn index(args: IndexArgs, pool: PgPool, index_dir: &str) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.build_dir, index_dir, &pool).await?;
+    write_unified_index(index, &args.build_dir, config, &pool).await?;
 
     Ok(())
 }
 
-async fn merge(args: MergeArgs, pool: PgPool, index_dir: &str) -> Result<()> {
-    let (ids, directories): (Vec<_>, Vec<_>) = open_unified_directories(index_dir, &pool)
+async fn merge(args: MergeArgs, pool: PgPool, config: &IndexConfig) -> Result<()> {
+    let (ids, directories): (Vec<_>, Vec<_>) = open_unified_directories(&config.path, &pool)
         .await?
         .into_iter()
         .map(|(id, dir)| (id, dir.box_clone()))
@@ -236,7 +270,7 @@ async fn merge(args: MergeArgs, pool: PgPool, index_dir: &str) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.merge_dir, index_dir, &pool).await?;
+    write_unified_index(index, &args.merge_dir, config, &pool).await?;
 
     let delete_result = query("DELETE FROM index_files WHERE id = ANY($1)")
         .bind(&ids)
@@ -245,7 +279,7 @@ async fn merge(args: MergeArgs, pool: PgPool, index_dir: &str) -> Result<()> {
 
     for id in ids {
         let _ = remove_file(
-            Path::new(index_dir)
+            Path::new(&config.path)
                 .join(format!("{}.index", id))
                 .to_str()
                 .expect("failed to build index path"),
@@ -359,18 +393,25 @@ async fn async_main() -> Result<()> {
     .await?;
 
     match args.subcmd {
+        SubCommand::Create(create_args) => {
+            create(create_args, pool).await?;
+        }
         SubCommand::Index(index_args) => {
-            index(index_args, pool, &args.index_dir).await?;
+            let config = get_index_config(&index_args.name, &pool).await?;
+            index(index_args, pool, &config).await?;
         }
         SubCommand::Merge(merge_args) => {
-            merge(merge_args, pool, &args.index_dir).await?;
+            let config = get_index_config(&merge_args.name, &pool).await?;
+            merge(merge_args, pool, &config).await?;
         }
         SubCommand::Search(search_args) => {
-            let directories = open_unified_directories(&args.index_dir, &pool)
+            let path = get_index_path(&search_args.name, &pool).await?;
+            let directories = open_unified_directories(&path, &pool)
                 .await?
                 .into_iter()
                 .map(|(_, x)| x)
                 .collect::<Vec<_>>();
+            drop(pool);
             search(search_args, directories).await?;
         }
     }
