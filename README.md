@@ -1,11 +1,13 @@
 ```sh
-cargo run -- index ~/hdfs-logs-multitenants-10000.json ~/test --merge
+cargo run -- create example_config.yaml
+
+cargo run -- index test ~/hdfs-logs-multitenants-10000.json
 # Commiting 10000 documents, after processing 10000
 # Merging 3 segments
 # Joining merging threads
 # Writing unified index file
 
-cargo run -- search ~/test "severity_text:INFO" --limit 1 | jq .
+cargo run -- search test "severity_text:INFO" --limit 1 | jq .
 # {
 #   "_dynamic": [
 #     {
@@ -24,4 +26,6 @@ cargo run -- search ~/test "severity_text:INFO" --limit 1 | jq .
 #     "2016-04-13T06:46:54Z"
 #   ]
 # }
+
+cargo run -- drop test
 ```
