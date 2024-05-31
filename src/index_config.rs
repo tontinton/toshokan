@@ -38,7 +38,7 @@ impl From<FastTextFieldType> for Option<&str> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct TextMappingConfig {
+pub struct TextMappingConfig {
     #[serde(default = "default_true")]
     pub stored: bool,
 
@@ -79,7 +79,7 @@ impl From<DateTimeFastPrecisionType> for Option<DateTimePrecision> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum DateTimeFormatType {
+pub enum DateTimeFormatType {
     Iso8601,
     Rfc2822,
     Rfc3339,
@@ -87,7 +87,7 @@ enum DateTimeFormatType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct DateTimeFormats(Vec<DateTimeFormatType>);
+pub struct DateTimeFormats(Vec<DateTimeFormatType>);
 
 impl Default for DateTimeFormats {
     fn default() -> Self {
@@ -107,7 +107,7 @@ impl Deref for DateTimeFormats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct DateTimeMappingConfig {
+pub struct DateTimeMappingConfig {
     #[serde(default = "default_true")]
     pub stored: bool,
 
@@ -123,21 +123,21 @@ struct DateTimeMappingConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum MappingFieldType {
+pub enum MappingFieldType {
     Text(TextMappingConfig),
     Datetime(DateTimeMappingConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct MappingConfig {
+pub struct MappingConfig {
     #[serde(rename = "type")]
-    type_: MappingFieldType,
+    pub type_: MappingFieldType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct IndexSchema {
+pub struct IndexSchema {
     #[serde(default)]
-    mappings: HashMap<String, MappingConfig>,
+    pub mappings: HashMap<String, MappingConfig>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,7 +153,7 @@ pub(crate) struct IndexConfig {
     version: u32,
 
     #[serde(default)]
-    schema: IndexSchema,
+    pub schema: IndexSchema,
 }
 
 impl IndexConfig {

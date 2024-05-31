@@ -8,3 +8,6 @@ schema:
       type: !datetime
       formats:
         - timestamp
+      indexed: true
+      stored: true
+      fast: true
