@@ -27,28 +27,33 @@ fn get_prettified_json(
 
     let mut prettified_field_map = BTreeMap::new();
     for field in fields {
-        if let Some(mut field_values) = named_doc.0.remove(&field.name) {
-            if field.array {
-                prettified_field_map.insert(field.name.clone(), OwnedValue::Array(field_values));
-                continue;
-            }
+        let Some(mut field_values) = named_doc.0.remove(&field.name) else {
+            continue;
+        };
 
-            if let Some(value) = field_values.pop() {
-                if field.name == DYNAMIC_FIELD_NAME {
-                    if let OwnedValue::Object(object) = value {
-                        for (k, v) in object {
-                            prettified_field_map.insert(k, v);
-                        }
-                    } else {
-                        return Err(eyre!(
-                            "expected {} field to be an object",
-                            DYNAMIC_FIELD_NAME
-                        ));
-                    }
-                } else {
-                    prettified_field_map.insert(field.name.clone(), value);
-                }
-            }
+        if field.array {
+            prettified_field_map.insert(field.name.clone(), OwnedValue::Array(field_values));
+            continue;
+        }
+
+        let Some(value) = field_values.pop() else {
+            continue;
+        };
+
+        if field.name != DYNAMIC_FIELD_NAME {
+            prettified_field_map.insert(field.name.clone(), value);
+            continue;
+        }
+
+        let OwnedValue::Object(object) = value else {
+            return Err(eyre!(
+                "expected {} field to be an object",
+                DYNAMIC_FIELD_NAME
+            ));
+        };
+
+        for (k, v) in object {
+            prettified_field_map.insert(k, v);
         }
     }
 

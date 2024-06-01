@@ -171,19 +171,22 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
         let mut json_obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&line)?;
 
         for (name, field, parse_fn) in &field_parsers {
-            if let Some(json_value) = json_obj.remove(name) {
-                match parse_fn(json_value) {
-                    Ok(ParsedValue::Single(value)) => {
+            let Some(json_value) = json_obj.remove(name) else {
+                debug!("field '{}' in schema but not found", &name);
+                continue;
+            };
+
+            match parse_fn(json_value) {
+                Ok(ParsedValue::Single(value)) => {
+                    doc.add_field_value(*field, value);
+                }
+                Ok(ParsedValue::Multiple(values)) => {
+                    for value in values {
                         doc.add_field_value(*field, value);
                     }
-                    Ok(ParsedValue::Multiple(values)) => {
-                        for value in values {
-                            doc.add_field_value(*field, value);
-                        }
-                    }
-                    Err(e) => {
-                        error!("failed to parse '{}': {}", &name, e);
-                    }
+                }
+                Err(e) => {
+                    error!("failed to parse '{}': {}", &name, e);
                 }
             }
         }
