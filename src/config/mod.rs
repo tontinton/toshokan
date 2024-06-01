@@ -36,12 +36,12 @@ pub enum FieldType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MappingConfig {
+pub struct FieldsConfig {
     #[serde(rename = "type")]
     pub type_: FieldType,
 }
 
-impl MappingConfig {
+impl FieldsConfig {
     pub fn is_indexed(&self) -> bool {
         use FieldType::*;
         match &self.type_ {
@@ -56,7 +56,7 @@ impl MappingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IndexSchema {
     #[serde(default)]
-    pub mappings: HashMap<String, MappingConfig>,
+    pub fields: HashMap<String, FieldsConfig>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,7 +65,7 @@ pub struct IndexSchema {
 
 impl IndexSchema {
     pub fn get_indexed_fields(&self) -> Vec<String> {
-        self.mappings
+        self.fields
             .iter()
             .filter(|(_, v)| v.is_indexed())
             .map(|(k, _)| k)

@@ -38,8 +38,8 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
         JsonObjectOptions::from(STORED | STRING).set_expand_dots_enabled(),
     );
 
-    let mut field_parsers: Vec<FieldParsers> = Vec::with_capacity(config.schema.mappings.len());
-    for (name, schema) in config.schema.mappings {
+    let mut field_parsers: Vec<FieldParsers> = Vec::with_capacity(config.schema.fields.len());
+    for (name, schema) in config.schema.fields {
         match schema.type_ {
             FieldType::Text(options) => {
                 let field = schema_builder.add_text_field(&name, options);

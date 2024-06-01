@@ -3,7 +3,7 @@ name: test
 path: /tmp/toshokan
 schema:
   time_field: timestamp
-  mappings:
+  fields:
     timestamp:
       type: !datetime
         formats:
