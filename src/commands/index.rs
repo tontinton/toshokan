@@ -111,6 +111,10 @@ fn get_field_parsers(
                 let field = schema_builder.add_ip_addr_field(&name, options);
                 field_parsers.push((name, field, Box::new(common_parse)));
             }
+            FieldType::DynamicObject(options) => {
+                let field = schema_builder.add_json_field(&name, options);
+                field_parsers.push((name, field, Box::new(common_parse)));
+            }
         }
     }
 

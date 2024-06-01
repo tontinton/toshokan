@@ -14,3 +14,6 @@ schema:
     tenant_id:
       type: !number
         type: u64
+    resource:
+      type: !dynamic_object
+        expand_dots: true

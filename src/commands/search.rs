@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use futures::future::{try_join, try_join_all};
 use sqlx::PgPool;
 use tantivy::{
@@ -26,9 +26,16 @@ fn get_prettified_json(
     for field_name in field_names {
         if let Some(mut field_values) = named_doc.0.remove(field_name) {
             if let Some(value) = field_values.pop() {
-                if let OwnedValue::Object(object) = value {
-                    for (k, v) in object {
-                        prettified_field_map.insert(k, v);
+                if field_name == DYNAMIC_FIELD_NAME {
+                    if let OwnedValue::Object(object) = value {
+                        for (k, v) in object {
+                            prettified_field_map.insert(k, v);
+                        }
+                    } else {
+                        return Err(eyre!(
+                            "expected {} field to be an object",
+                            DYNAMIC_FIELD_NAME
+                        ));
                     }
                 } else {
                     prettified_field_map.insert(field_name.clone(), value);
