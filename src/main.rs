@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use args::{CreateArgs, DropArgs, IndexArgs, MergeArgs, SearchArgs};
+use args::{Args, CreateArgs, DropArgs, IndexArgs, MergeArgs, SearchArgs};
 use color_eyre::eyre::{eyre, Result};
 use dotenvy::dotenv;
 use futures::future::{try_join, try_join_all};
@@ -450,26 +450,7 @@ async fn open_db_pool(url: &str) -> Result<PgPool> {
         .await?)
 }
 
-async fn async_main() -> Result<()> {
-    color_eyre::install()?;
-
-    // Load vars inside .env into env vars, does nothing if the file does not exist.
-    let _ = dotenv();
-
-    let default_log_level = if cfg!(debug_assertions) {
-        DEFAULT_DEBUG_LOG_LEVEL
-    } else {
-        DEFAULT_RELEASE_LOG_LEVEL
-    };
-
-    let mut log_builder = formatted_timed_builder();
-    log_builder.parse_filters(
-        &std::env::var("RUST_LOG").unwrap_or_else(|_| default_log_level.to_string()),
-    );
-    log_builder.try_init()?;
-
-    let args = parse_args();
-
+async fn async_main(args: Args) -> Result<()> {
     let pool = open_db_pool(&args.db.unwrap_or_else(|| {
         std::env::var("DATABASE_URL")
             .expect("database url must be provided using either --db or DATABASE_URL env var")
@@ -508,9 +489,28 @@ async fn async_main() -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    color_eyre::install()?;
+
+    // Load vars inside .env into env vars, does nothing if the file does not exist.
+    let _ = dotenv();
+
+    let default_log_level = if cfg!(debug_assertions) {
+        DEFAULT_DEBUG_LOG_LEVEL
+    } else {
+        DEFAULT_RELEASE_LOG_LEVEL
+    };
+
+    let mut log_builder = formatted_timed_builder();
+    log_builder.parse_filters(
+        &std::env::var("RUST_LOG").unwrap_or_else(|_| default_log_level.to_string()),
+    );
+    log_builder.try_init()?;
+
+    let args = parse_args();
+
     let runtime = Builder::new_multi_thread()
         .thread_keep_alive(Duration::from_secs(20))
         .enable_all()
         .build()?;
-    runtime.block_on(async_main())
+    runtime.block_on(async_main(args))
 }
