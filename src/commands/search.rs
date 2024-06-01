@@ -13,7 +13,7 @@ use tokio::{spawn, sync::mpsc::channel, task::spawn_blocking};
 
 use crate::args::SearchArgs;
 
-use super::{get_index_config, open_unified_directories};
+use super::{get_index_config, open_unified_directories, DYNAMIC_FIELD_NAME};
 
 fn get_prettified_json(
     doc: TantivyDocument,
@@ -49,7 +49,7 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
 
     let indexed_field_names = {
         let mut fields = config.schema.get_indexed_fields();
-        fields.push("_dynamic".to_string());
+        fields.push(DYNAMIC_FIELD_NAME.to_string());
         fields
     };
 

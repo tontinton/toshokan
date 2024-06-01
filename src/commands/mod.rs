@@ -26,6 +26,8 @@ use crate::{
     },
 };
 
+const DYNAMIC_FIELD_NAME: &str = "_dynamic";
+
 async fn get_index_config(name: &str, pool: &PgPool) -> Result<IndexConfig> {
     let (value,): (serde_json::Value,) = query_as("SELECT config FROM indexes WHERE name=$1")
         .bind(name)

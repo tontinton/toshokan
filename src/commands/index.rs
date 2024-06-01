@@ -14,7 +14,7 @@ use tokio::{
 
 use crate::{args::IndexArgs, index_config::FieldType};
 
-use super::{get_index_config, write_unified_index};
+use super::{get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
 
 fn common_parse(value: serde_json::Value) -> Result<OwnedValue> {
     Ok(serde_json::from_value(value)?)
@@ -57,7 +57,7 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
 
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(
-        "_dynamic",
+        DYNAMIC_FIELD_NAME,
         JsonObjectOptions::from(STORED | STRING).set_expand_dots_enabled(),
     );
 
