@@ -1,24 +1,47 @@
 use serde::{Deserialize, Serialize};
-use tantivy::schema::{JsonObjectOptions, TextFieldIndexing};
+use tantivy::schema::{IndexRecordOption, JsonObjectOptions, TextFieldIndexing};
 
-use super::{
-    default_true,
-    text::{FastTextFieldType, IndexedTextFieldType},
-};
+use super::{default_true, FastFieldNormalizerType, FieldTokenizerType};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexedDynamicObjectFieldConfig {
+    #[serde(default)]
+    pub record: IndexRecordOption,
+
+    #[serde(default = "default_tokenizer")]
+    pub tokenizer: FieldTokenizerType,
+}
+
+fn default_tokenizer() -> FieldTokenizerType {
+    FieldTokenizerType::Raw
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexedDynamicObjectFieldType {
+    False,
+    #[default]
+    True,
+    Indexed(IndexedDynamicObjectFieldConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicObjectFieldConfig {
     #[serde(default = "default_true")]
     pub stored: bool,
 
-    #[serde(default)]
-    pub fast: FastTextFieldType,
+    #[serde(default = "default_fast_normalizer")]
+    pub fast: FastFieldNormalizerType,
 
     #[serde(default)]
-    pub indexed: IndexedTextFieldType,
+    pub indexed: IndexedDynamicObjectFieldType,
 
     #[serde(default = "default_true")]
     pub expand_dots: bool,
+}
+
+fn default_fast_normalizer() -> FastFieldNormalizerType {
+    FastFieldNormalizerType::True
 }
 
 impl From<DynamicObjectFieldConfig> for JsonObjectOptions {
@@ -29,13 +52,15 @@ impl From<DynamicObjectFieldConfig> for JsonObjectOptions {
         }
         options = options.set_fast(config.fast.into());
         match config.indexed {
-            IndexedTextFieldType::False => {}
-            IndexedTextFieldType::True => {
+            IndexedDynamicObjectFieldType::False => {}
+            IndexedDynamicObjectFieldType::True => {
                 options = options.set_indexing_options(TextFieldIndexing::default());
             }
-            IndexedTextFieldType::Indexed(config) => {
+            IndexedDynamicObjectFieldType::Indexed(config) => {
                 options = options.set_indexing_options(
-                    TextFieldIndexing::default().set_index_option(config.record),
+                    TextFieldIndexing::default()
+                        .set_index_option(config.record)
+                        .set_tokenizer(config.tokenizer.into()),
                 );
             }
         }

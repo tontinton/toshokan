@@ -11,6 +11,8 @@ use color_eyre::eyre::Result;
 use serde::{Deserialize, Serialize};
 use tokio::fs::read_to_string;
 
+use crate::config::dynamic_object::IndexedDynamicObjectFieldType;
+
 use self::{
     boolean::BooleanFieldConfig,
     datetime::DateTimeFieldConfig,
@@ -28,6 +30,61 @@ fn default_version() -> u32 {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FastFieldNormalizerType {
+    False,
+
+    /// Chops the text on according to whitespace and
+    /// punctuation, removes tokens that are too long, and lowercases
+    /// tokens.
+    True,
+
+    /// Does not process nor tokenize the text.
+    Raw,
+}
+
+impl From<FastFieldNormalizerType> for Option<&str> {
+    fn from(value: FastFieldNormalizerType) -> Self {
+        match value {
+            FastFieldNormalizerType::False => None,
+            FastFieldNormalizerType::True => Some("default"),
+            FastFieldNormalizerType::Raw => Some("raw"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldTokenizerType {
+    /// Chops the text on according to whitespace and
+    /// punctuation, removes tokens that are too long, and lowercases
+    /// tokens.
+    Default,
+
+    /// Does not process nor tokenize the text.
+    Raw,
+
+    /// Like `true`, but also applies stemming on the
+    /// resulting tokens. Stemming can improve the recall of your
+    /// search engine.
+    EnStem,
+
+    /// Splits the text on whitespaces.
+    Whitespace,
+}
+
+impl From<FieldTokenizerType> for &str {
+    fn from(value: FieldTokenizerType) -> Self {
+        match value {
+            FieldTokenizerType::Default => "default",
+            FieldTokenizerType::Raw => "raw",
+            FieldTokenizerType::EnStem => "en_stem",
+            FieldTokenizerType::Whitespace => "whitespace",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +113,9 @@ impl FieldsConfig {
             Boolean(config) => config.indexed,
             Datetime(config) => config.indexed,
             Ip(config) => config.indexed,
-            DynamicObject(config) => !matches!(config.indexed, IndexedTextFieldType::False),
+            DynamicObject(config) => {
+                !matches!(config.indexed, IndexedDynamicObjectFieldType::False)
+            }
         }
     }
 }

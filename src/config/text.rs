@@ -1,50 +1,32 @@
 use serde::{Deserialize, Serialize};
 use tantivy::schema::{IndexRecordOption, TextFieldIndexing, TextOptions};
 
-use super::default_true;
+use super::{default_true, FastFieldNormalizerType, FieldTokenizerType};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum FastTextFieldType {
-    #[default]
-    False,
-
-    /// Chops the text on according to whitespace and
-    /// punctuation, removes tokens that are too long, and lowercases
-    /// tokens.
-    True,
-
-    /// Does not process nor tokenize the text.
-    Raw,
-
-    /// Like `true`, but also applies stemming on the
-    /// resulting tokens. Stemming can improve the recall of your
-    /// search engine.
-    EnStem,
-
-    /// Splits the text on whitespaces.
-    Whitespace,
-}
-
-impl From<FastTextFieldType> for Option<&str> {
-    fn from(value: FastTextFieldType) -> Self {
-        match value {
-            FastTextFieldType::False => None,
-            FastTextFieldType::True => Some("default"),
-            FastTextFieldType::Raw => Some("raw"),
-            FastTextFieldType::EnStem => Some("en_stem"),
-            FastTextFieldType::Whitespace => Some("whitespace"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexedTextFieldConfig {
     #[serde(default)]
     pub record: IndexRecordOption,
 
     #[serde(default = "default_true")]
     pub fieldnorms: bool,
+
+    #[serde(default = "default_tokenizer")]
+    pub tokenizer: FieldTokenizerType,
+}
+
+fn default_tokenizer() -> FieldTokenizerType {
+    FieldTokenizerType::Default
+}
+
+impl Default for IndexedTextFieldConfig {
+    fn default() -> Self {
+        Self {
+            record: IndexRecordOption::default(),
+            fieldnorms: true,
+            tokenizer: FieldTokenizerType::Default,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -56,16 +38,20 @@ pub enum IndexedTextFieldType {
     Indexed(IndexedTextFieldConfig),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextFieldConfig {
     #[serde(default = "default_true")]
     pub stored: bool,
 
-    #[serde(default)]
-    pub fast: FastTextFieldType,
+    #[serde(default = "default_fast_normalizer")]
+    pub fast: FastFieldNormalizerType,
 
     #[serde(default)]
     pub indexed: IndexedTextFieldType,
+}
+
+fn default_fast_normalizer() -> FastFieldNormalizerType {
+    FastFieldNormalizerType::False
 }
 
 impl From<TextFieldConfig> for TextOptions {
@@ -84,7 +70,8 @@ impl From<TextFieldConfig> for TextOptions {
                 options = options.set_indexing_options(
                     TextFieldIndexing::default()
                         .set_index_option(config.record)
-                        .set_fieldnorms(config.fieldnorms),
+                        .set_fieldnorms(config.fieldnorms)
+                        .set_tokenizer(config.tokenizer.into()),
                 );
             }
         }
