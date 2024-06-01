@@ -1,10 +1,10 @@
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use sqlx::PgPool;
 use tantivy::{
     directory::MmapDirectory,
     indexer::NoMergePolicy,
     schema::{Field, JsonObjectOptions, OwnedValue, Schema, STORED, STRING},
-    DateTime, Index, IndexWriter, TantivyDocument,
+    Index, IndexWriter, TantivyDocument,
 };
 use tokio::{
     fs::{create_dir_all, File},
@@ -16,40 +16,14 @@ use crate::{args::IndexArgs, index_config::FieldType};
 
 use super::{get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
 
+type FieldParsers = (
+    String,                                               // name
+    Field,                                                // tantivy field in schema
+    Box<dyn Fn(serde_json::Value) -> Result<OwnedValue>>, // parse function
+);
+
 fn common_parse(value: serde_json::Value) -> Result<OwnedValue> {
     Ok(serde_json::from_value(value)?)
-}
-
-pub fn parse_timestamp(timestamp: i64) -> Result<DateTime> {
-    // Minimum supported timestamp value in seconds (13 Apr 1972 23:59:55 GMT).
-    const MIN_TIMESTAMP_SECONDS: i64 = 72_057_595;
-
-    // Maximum supported timestamp value in seconds (16 Mar 2242 12:56:31 GMT).
-    const MAX_TIMESTAMP_SECONDS: i64 = 8_589_934_591;
-
-    const MIN_TIMESTAMP_MILLIS: i64 = MIN_TIMESTAMP_SECONDS * 1000;
-    const MAX_TIMESTAMP_MILLIS: i64 = MAX_TIMESTAMP_SECONDS * 1000;
-    const MIN_TIMESTAMP_MICROS: i64 = MIN_TIMESTAMP_SECONDS * 1_000_000;
-    const MAX_TIMESTAMP_MICROS: i64 = MAX_TIMESTAMP_SECONDS * 1_000_000;
-    const MIN_TIMESTAMP_NANOS: i64 = MIN_TIMESTAMP_SECONDS * 1_000_000_000;
-    const MAX_TIMESTAMP_NANOS: i64 = MAX_TIMESTAMP_SECONDS * 1_000_000_000;
-
-    match timestamp {
-        MIN_TIMESTAMP_SECONDS..=MAX_TIMESTAMP_SECONDS => {
-            Ok(DateTime::from_timestamp_secs(timestamp))
-        }
-        MIN_TIMESTAMP_MILLIS..=MAX_TIMESTAMP_MILLIS => {
-            Ok(DateTime::from_timestamp_millis(timestamp))
-        }
-        MIN_TIMESTAMP_MICROS..=MAX_TIMESTAMP_MICROS => {
-            Ok(DateTime::from_timestamp_micros(timestamp))
-        }
-        MIN_TIMESTAMP_NANOS..=MAX_TIMESTAMP_NANOS => Ok(DateTime::from_timestamp_nanos(timestamp)),
-        _ => Err(eyre!(
-            "failed to parse unix timestamp `{timestamp}`. Supported timestamp ranges \
-             from `13 Apr 1972 23:59:55` to `16 Mar 2242 12:56:31`"
-        )),
-    }
 }
 
 pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
@@ -61,19 +35,20 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
         JsonObjectOptions::from(STORED | STRING).set_expand_dots_enabled(),
     );
 
-    let mut fields = Vec::<(String, Field, fn(serde_json::Value) -> Result<OwnedValue>)>::new();
+    let mut field_parsers: Vec<FieldParsers> = Vec::with_capacity(config.schema.mappings.len());
     for (name, schema) in config.schema.mappings {
         match schema.type_ {
             FieldType::Text(options) => {
                 let field = schema_builder.add_text_field(&name, options);
-                fields.push((name, field, common_parse));
+                field_parsers.push((name, field, Box::new(common_parse)));
             }
             FieldType::Datetime(options) => {
-                let field = schema_builder.add_date_field(&name, options);
-                fields.push((name, field, |v| {
-                    let timestamp: i64 = serde_json::from_value(v)?;
-                    Ok(parse_timestamp(timestamp)?.into())
-                }));
+                let field = schema_builder.add_date_field(&name, options.clone());
+                field_parsers.push((
+                    name,
+                    field,
+                    Box::new(move |value| options.formats.try_parse(value)),
+                ));
             }
         }
     }
@@ -99,7 +74,7 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
         let mut doc = TantivyDocument::new();
         let mut json_obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&line)?;
 
-        for (name, field, parse_fn) in &fields {
+        for (name, field, parse_fn) in &field_parsers {
             if let Some(value) = json_obj.remove(name) {
                 doc.add_field_value(*field, parse_fn(value)?);
             }

@@ -1,10 +1,10 @@
 use std::{collections::HashMap, ops::Deref, path::Path};
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
 use tantivy::{
-    schema::{IndexRecordOption, TextFieldIndexing, TextOptions},
-    DateOptions, DateTimePrecision,
+    schema::{IndexRecordOption, OwnedValue, TextFieldIndexing, TextOptions},
+    DateOptions, DateTime, DateTimePrecision,
 };
 use tokio::fs::read_to_string;
 
@@ -16,6 +16,38 @@ fn default_version() -> u32 {
 
 fn default_true() -> bool {
     true
+}
+
+pub fn parse_timestamp(timestamp: i64) -> Result<DateTime> {
+    // Minimum supported timestamp value in seconds (13 Apr 1972 23:59:55 GMT).
+    const MIN_TIMESTAMP_SECONDS: i64 = 72_057_595;
+
+    // Maximum supported timestamp value in seconds (16 Mar 2242 12:56:31 GMT).
+    const MAX_TIMESTAMP_SECONDS: i64 = 8_589_934_591;
+
+    const MIN_TIMESTAMP_MILLIS: i64 = MIN_TIMESTAMP_SECONDS * 1000;
+    const MAX_TIMESTAMP_MILLIS: i64 = MAX_TIMESTAMP_SECONDS * 1000;
+    const MIN_TIMESTAMP_MICROS: i64 = MIN_TIMESTAMP_SECONDS * 1_000_000;
+    const MAX_TIMESTAMP_MICROS: i64 = MAX_TIMESTAMP_SECONDS * 1_000_000;
+    const MIN_TIMESTAMP_NANOS: i64 = MIN_TIMESTAMP_SECONDS * 1_000_000_000;
+    const MAX_TIMESTAMP_NANOS: i64 = MAX_TIMESTAMP_SECONDS * 1_000_000_000;
+
+    match timestamp {
+        MIN_TIMESTAMP_SECONDS..=MAX_TIMESTAMP_SECONDS => {
+            Ok(DateTime::from_timestamp_secs(timestamp))
+        }
+        MIN_TIMESTAMP_MILLIS..=MAX_TIMESTAMP_MILLIS => {
+            Ok(DateTime::from_timestamp_millis(timestamp))
+        }
+        MIN_TIMESTAMP_MICROS..=MAX_TIMESTAMP_MICROS => {
+            Ok(DateTime::from_timestamp_micros(timestamp))
+        }
+        MIN_TIMESTAMP_NANOS..=MAX_TIMESTAMP_NANOS => Ok(DateTime::from_timestamp_nanos(timestamp)),
+        _ => Err(eyre!(
+            "failed to parse unix timestamp `{timestamp}`. Supported timestamp ranges \
+             from `13 Apr 1972 23:59:55` to `16 Mar 2242 12:56:31`"
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -101,6 +133,18 @@ pub enum DateTimeFormatType {
     Timestamp,
 }
 
+impl DateTimeFormatType {
+    fn try_parse(&self, value: serde_json::Value) -> Result<OwnedValue> {
+        match self {
+            DateTimeFormatType::Timestamp => {
+                let timestamp: i64 = serde_json::from_value(value)?;
+                Ok(parse_timestamp(timestamp)?.into())
+            }
+            _ => Err(eyre!("unsupported format")),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DateTimeFormats(Vec<DateTimeFormatType>);
 
@@ -118,6 +162,25 @@ impl Deref for DateTimeFormats {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DateTimeFormats {
+    pub fn try_parse(&self, value: serde_json::Value) -> Result<OwnedValue> {
+        for format in &self.0 {
+            match format.try_parse(value.clone()) {
+                Ok(x) => {
+                    return Ok(x);
+                }
+                Err(e) => {
+                    debug!(
+                        "failed to parse using the {:?} datetime format: {}",
+                        format, e
+                    );
+                }
+            }
+        }
+        Err(eyre!("none of the datetime formats was able to parse"))
     }
 }
 
