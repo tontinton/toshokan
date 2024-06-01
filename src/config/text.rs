@@ -54,24 +54,24 @@ pub struct TextFieldConfig {
 
 impl From<TextFieldConfig> for TextOptions {
     fn from(config: TextFieldConfig) -> Self {
-        let mut text_options = TextOptions::default();
+        let mut options = TextOptions::default();
         if config.stored {
-            text_options = text_options.set_stored();
+            options = options.set_stored();
         }
-        text_options = text_options.set_fast(config.fast.into());
+        options = options.set_fast(config.fast.into());
         match config.indexed {
             IndexedTextFieldType::False => {}
             IndexedTextFieldType::True => {
-                text_options = text_options.set_indexing_options(TextFieldIndexing::default());
+                options = options.set_indexing_options(TextFieldIndexing::default());
             }
             IndexedTextFieldType::Indexed(config) => {
-                text_options = text_options.set_indexing_options(
+                options = options.set_indexing_options(
                     TextFieldIndexing::default()
                         .set_index_option(config.record)
                         .set_fieldnorms(config.fieldnorms),
                 );
             }
         }
-        text_options
+        options
     }
 }

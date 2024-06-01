@@ -164,16 +164,16 @@ pub struct DateTimeFieldConfig {
 
 impl From<DateTimeFieldConfig> for DateOptions {
     fn from(config: DateTimeFieldConfig) -> Self {
-        let mut date_options = DateOptions::default();
+        let mut options = DateOptions::default();
         if config.stored {
-            date_options = date_options.set_stored();
+            options = options.set_stored();
         }
         if config.indexed {
-            date_options = date_options.set_indexed();
+            options = options.set_indexed();
         }
         if let Some(precision) = config.fast.into() {
-            date_options = date_options.set_fast().set_precision(precision);
+            options = options.set_fast().set_precision(precision);
         }
-        date_options
+        options
     }
 }
