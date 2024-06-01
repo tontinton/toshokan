@@ -12,7 +12,7 @@ use tokio::{
     task::spawn_blocking,
 };
 
-use crate::{args::IndexArgs, index_config::FieldType};
+use crate::{args::IndexArgs, config::FieldType};
 
 use super::{get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
 

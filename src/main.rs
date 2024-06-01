@@ -1,7 +1,7 @@
 mod args;
 mod bincode;
 mod commands;
-mod index_config;
+mod config;
 mod merge_directory;
 mod opendal_file_handle;
 mod unified_index;

@@ -1,7 +1,7 @@
 use color_eyre::Result;
 use sqlx::{query, PgPool};
 
-use crate::{args::CreateArgs, index_config::IndexConfig};
+use crate::{args::CreateArgs, config::IndexConfig};
 
 pub async fn run_create(args: CreateArgs, pool: PgPool) -> Result<()> {
     let config = IndexConfig::from_path(&args.config_path).await?;

@@ -18,7 +18,7 @@ use tokio::{io::AsyncWriteExt, task::spawn_blocking};
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
 
 use crate::{
-    index_config::IndexConfig,
+    config::IndexConfig,
     opendal_file_handle::OpenDalFileHandle,
     unified_index::{
         file_cache::build_file_cache, unified_directory::UnifiedDirectory,
