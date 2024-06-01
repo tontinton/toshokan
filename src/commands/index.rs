@@ -1,4 +1,4 @@
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use sqlx::PgPool;
 use tantivy::{
     directory::MmapDirectory,
@@ -68,6 +68,34 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
                                 NumberFieldType::I64 => value_str.parse::<i64>()?.into(),
                                 NumberFieldType::F64 => value_str.parse::<f64>()?.into(),
                             })
+                        } else {
+                            common_parse(value)
+                        }
+                    }),
+                ));
+            }
+            FieldType::Boolean(options) => {
+                let parse_string = options.parse_string;
+                let field = schema_builder.add_bool_field(&name, options);
+                field_parsers.push((
+                    name,
+                    field,
+                    Box::new(move |value| {
+                        if !parse_string {
+                            return common_parse(value);
+                        }
+
+                        if let Ok(value_str) = serde_json::from_value::<String>(value.clone()) {
+                            let trimmed = value_str.trim();
+                            if trimmed.len() < 4 || trimmed.len() > 5 {
+                                return Err(eyre!("cannot parse '{}' as boolean", trimmed));
+                            }
+                            let value_str = trimmed.to_lowercase();
+                            match value_str.as_str() {
+                                "true" => Ok(true.into()),
+                                "false" => Ok(false.into()),
+                                _ => Err(eyre!("cannot parse '{}' as boolean", trimmed)),
+                            }
                         } else {
                             common_parse(value)
                         }

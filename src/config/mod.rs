@@ -1,3 +1,4 @@
+pub mod boolean;
 pub mod datetime;
 pub mod number;
 pub mod text;
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs::read_to_string;
 
 use self::{
+    boolean::BooleanFieldConfig,
     datetime::DateTimeFieldConfig,
     number::NumberFieldConfig,
     text::{IndexedTextFieldType, TextFieldConfig},
@@ -29,6 +31,7 @@ fn default_true() -> bool {
 pub enum FieldType {
     Text(TextFieldConfig),
     Number(NumberFieldConfig),
+    Boolean(BooleanFieldConfig),
     Datetime(DateTimeFieldConfig),
 }
 
@@ -44,6 +47,7 @@ impl MappingConfig {
         match &self.type_ {
             Text(config) => !matches!(config.indexed, IndexedTextFieldType::False),
             Number(config) => config.indexed,
+            Boolean(config) => config.indexed,
             Datetime(config) => config.indexed,
         }
     }
