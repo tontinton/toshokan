@@ -66,8 +66,8 @@ mod tests {
         let op = Operator::new(builder)?.finish().blocking();
 
         let reader = OpenDalFileHandle::from_path(
-            &path,
-            op.reader_with(&path.file_name().unwrap().to_str().unwrap())
+            path,
+            op.reader_with(path.file_name().unwrap().to_str().unwrap())
                 .call()?,
         )
         .await?;
