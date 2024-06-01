@@ -192,6 +192,7 @@ async fn run_drop(args: DropArgs, pool: PgPool, base_path: &str) -> Result<()> {
             .bind(&args.name)
             .fetch_all(&pool)
             .await?;
+    let file_names_len = file_names.len();
 
     for (file_name,) in file_names {
         let _ = remove_file(
@@ -207,6 +208,12 @@ async fn run_drop(args: DropArgs, pool: PgPool, base_path: &str) -> Result<()> {
         .bind(&args.name)
         .execute(&pool)
         .await?;
+
+    info!(
+        "Dropped index: {} ({} number of index files)",
+        &args.name, file_names_len
+    );
+
     Ok(())
 }
 
