@@ -6,6 +6,7 @@ mod opendal_file_handle;
 mod unified_index;
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -376,12 +377,41 @@ async fn run_merge(args: MergeArgs, pool: PgPool, config: IndexConfig) -> Result
     Ok(())
 }
 
+fn get_prettified_json(
+    doc: TantivyDocument,
+    schema: &Schema,
+    field_names: &[String],
+) -> Result<String> {
+    let mut named_doc = doc.to_named_doc(schema);
+
+    let mut prettified_field_map = BTreeMap::new();
+    for field_name in field_names {
+        if let Some(mut field_values) = named_doc.0.remove(field_name) {
+            if let Some(value) = field_values.pop() {
+                if let OwnedValue::Object(object) = value {
+                    for (k, v) in object {
+                        prettified_field_map.insert(k, v);
+                    }
+                } else {
+                    prettified_field_map.insert(field_name.clone(), value);
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::to_string(&prettified_field_map)?)
+}
+
 async fn run_search(args: SearchArgs, pool: PgPool, config: IndexConfig) -> Result<()> {
     if args.limit == 0 {
         return Ok(());
     }
 
-    let indexed_field_names = config.schema.get_indexed_fields();
+    let indexed_field_names = {
+        let mut fields = config.schema.get_indexed_fields();
+        fields.push("_dynamic".to_string());
+        fields
+    };
 
     let directories = open_unified_directories(&config.path, &pool)
         .await?
@@ -407,16 +437,10 @@ async fn run_search(args: SearchArgs, pool: PgPool, config: IndexConfig) -> Resu
             let index = Index::open(directory)?;
             let schema = index.schema();
 
-            let dynamic_field = schema.get_field("_dynamic")?;
-
-            let indexed_fields = {
-                let mut fields = indexed_field_names
-                    .iter()
-                    .map(|name| schema.get_field(name))
-                    .collect::<tantivy::Result<Vec<_>>>()?;
-                fields.push(dynamic_field);
-                fields
-            };
+            let indexed_fields = indexed_field_names
+                .iter()
+                .map(|name| schema.get_field(name))
+                .collect::<tantivy::Result<Vec<_>>>()?;
 
             let reader = index
                 .reader_builder()
@@ -434,7 +458,8 @@ async fn run_search(args: SearchArgs, pool: PgPool, config: IndexConfig) -> Resu
 
             for (_, doc_address) in docs {
                 let doc: TantivyDocument = searcher.doc(doc_address)?;
-                if tx.blocking_send(doc.to_json(&schema)).is_err() {
+                let doc_str = get_prettified_json(doc, &schema, &indexed_field_names)?;
+                if tx.blocking_send(doc_str).is_err() {
                     return Ok(());
                 }
             }
