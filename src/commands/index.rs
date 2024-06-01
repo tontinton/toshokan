@@ -12,7 +12,10 @@ use tokio::{
     task::spawn_blocking,
 };
 
-use crate::{args::IndexArgs, config::FieldType};
+use crate::{
+    args::IndexArgs,
+    config::{number::NumberFieldType, FieldType},
+};
 
 use super::{get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
 
@@ -41,6 +44,35 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
             FieldType::Text(options) => {
                 let field = schema_builder.add_text_field(&name, options);
                 field_parsers.push((name, field, Box::new(common_parse)));
+            }
+            FieldType::Number(options) => {
+                let field_type = options.type_.clone();
+                let parse_string = options.parse_string;
+                let field = match field_type {
+                    NumberFieldType::U64 => schema_builder.add_u64_field(&name, options),
+                    NumberFieldType::I64 => schema_builder.add_i64_field(&name, options),
+                    NumberFieldType::F64 => schema_builder.add_f64_field(&name, options),
+                };
+
+                field_parsers.push((
+                    name,
+                    field,
+                    Box::new(move |value| {
+                        if !parse_string {
+                            return common_parse(value);
+                        }
+
+                        if let Ok(value_str) = serde_json::from_value::<String>(value.clone()) {
+                            Ok(match field_type {
+                                NumberFieldType::U64 => value_str.parse::<u64>()?.into(),
+                                NumberFieldType::I64 => value_str.parse::<i64>()?.into(),
+                                NumberFieldType::F64 => value_str.parse::<f64>()?.into(),
+                            })
+                        } else {
+                            common_parse(value)
+                        }
+                    }),
+                ));
             }
             FieldType::Datetime(options) => {
                 let field = schema_builder.add_date_field(&name, options.clone());

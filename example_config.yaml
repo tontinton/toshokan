@@ -11,3 +11,6 @@ schema:
         indexed: true
         stored: true
         fast: true
+    tenant_id:
+      type: !number
+        type: u64

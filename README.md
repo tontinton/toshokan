@@ -7,7 +7,7 @@ cargo run -- index test ~/hdfs-logs-multitenants-10000.json
 # Joining merging threads
 # Writing unified index file
 
-cargo run -- search test "severity_text:INFO" --limit 1 | jq .
+cargo run -- search test "tenant_id:[60 TO 65} AND severity_text:INFO" --limit 1 | jq .
 # {
 #   "attributes": {
 #     "class": "org.apache.hadoop.hdfs.server.datanode.DataNode.clienttrace"

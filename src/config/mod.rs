@@ -1,4 +1,5 @@
 pub mod datetime;
+pub mod number;
 pub mod text;
 
 use std::{collections::HashMap, path::Path};
@@ -9,6 +10,7 @@ use tokio::fs::read_to_string;
 
 use self::{
     datetime::DateTimeFieldConfig,
+    number::NumberFieldConfig,
     text::{IndexedTextFieldType, TextFieldConfig},
 };
 
@@ -26,6 +28,7 @@ fn default_true() -> bool {
 #[serde(rename_all = "snake_case")]
 pub enum FieldType {
     Text(TextFieldConfig),
+    Number(NumberFieldConfig),
     Datetime(DateTimeFieldConfig),
 }
 
@@ -40,6 +43,7 @@ impl MappingConfig {
         use FieldType::*;
         match &self.type_ {
             Text(config) => !matches!(config.indexed, IndexedTextFieldType::False),
+            Number(config) => config.indexed,
             Datetime(config) => config.indexed,
         }
     }
