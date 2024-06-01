@@ -1,5 +1,6 @@
 pub mod boolean;
 pub mod datetime;
+pub mod ip;
 pub mod number;
 pub mod text;
 
@@ -12,6 +13,7 @@ use tokio::fs::read_to_string;
 use self::{
     boolean::BooleanFieldConfig,
     datetime::DateTimeFieldConfig,
+    ip::IpFieldConfig,
     number::NumberFieldConfig,
     text::{IndexedTextFieldType, TextFieldConfig},
 };
@@ -33,6 +35,7 @@ pub enum FieldType {
     Number(NumberFieldConfig),
     Boolean(BooleanFieldConfig),
     Datetime(DateTimeFieldConfig),
+    Ip(IpFieldConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +52,7 @@ impl FieldsConfig {
             Number(config) => config.indexed,
             Boolean(config) => config.indexed,
             Datetime(config) => config.indexed,
+            Ip(config) => config.indexed,
         }
     }
 }

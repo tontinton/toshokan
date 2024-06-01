@@ -110,6 +110,10 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
                     Box::new(move |value| options.formats.try_parse(value)),
                 ));
             }
+            FieldType::Ip(options) => {
+                let field = schema_builder.add_ip_addr_field(&name, options);
+                field_parsers.push((name, field, Box::new(common_parse)));
+            }
         }
     }
 
