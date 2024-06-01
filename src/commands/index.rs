@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use color_eyre::{eyre::eyre, Result};
 use sqlx::PgPool;
 use tantivy::{
     directory::MmapDirectory,
     indexer::NoMergePolicy,
-    schema::{Field, JsonObjectOptions, OwnedValue, Schema, STORED, STRING},
+    schema::{Field, JsonObjectOptions, OwnedValue, Schema, SchemaBuilder, STORED, STRING},
     Index, IndexWriter, TantivyDocument,
 };
 use tokio::{
@@ -14,7 +16,7 @@ use tokio::{
 
 use crate::{
     args::IndexArgs,
-    config::{number::NumberFieldType, FieldType},
+    config::{number::NumberFieldType, FieldType, FieldsConfig},
 };
 
 use super::{get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
@@ -29,17 +31,12 @@ fn common_parse(value: serde_json::Value) -> Result<OwnedValue> {
     Ok(serde_json::from_value(value)?)
 }
 
-pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
-    let config = get_index_config(&args.name, &pool).await?;
-
-    let mut schema_builder = Schema::builder();
-    let dynamic_field = schema_builder.add_json_field(
-        DYNAMIC_FIELD_NAME,
-        JsonObjectOptions::from(STORED | STRING).set_expand_dots_enabled(),
-    );
-
-    let mut field_parsers: Vec<FieldParsers> = Vec::with_capacity(config.schema.fields.len());
-    for (name, schema) in config.schema.fields {
+fn get_field_parsers(
+    fields: HashMap<String, FieldsConfig>,
+    schema_builder: &mut SchemaBuilder,
+) -> Result<Vec<FieldParsers>> {
+    let mut field_parsers: Vec<FieldParsers> = Vec::with_capacity(fields.len());
+    for (name, schema) in fields {
         match schema.type_ {
             FieldType::Text(options) => {
                 let field = schema_builder.add_text_field(&name, options);
@@ -116,6 +113,19 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
             }
         }
     }
+
+    Ok(field_parsers)
+}
+
+pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
+    let config = get_index_config(&args.name, &pool).await?;
+
+    let mut schema_builder = Schema::builder();
+    let dynamic_field = schema_builder.add_json_field(
+        DYNAMIC_FIELD_NAME,
+        JsonObjectOptions::from(STORED | STRING).set_expand_dots_enabled(),
+    );
+    let field_parsers = get_field_parsers(config.schema.fields, &mut schema_builder)?;
 
     let schema = schema_builder.build();
 
