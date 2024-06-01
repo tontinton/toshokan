@@ -4,16 +4,16 @@ path: /tmp/toshokan
 schema:
   time_field: timestamp
   fields:
-    timestamp:
+    - name: timestamp
       type: !datetime
         formats:
           - timestamp
         indexed: true
         stored: true
         fast: true
-    tenant_id:
+    - name: tenant_id
       type: !number
         type: u64
-    resource:
+    - name: resource
       type: !dynamic_object
         expand_dots: true

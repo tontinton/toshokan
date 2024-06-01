@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use color_eyre::{eyre::eyre, Result};
 use sqlx::PgPool;
 use tantivy::{
@@ -32,11 +30,12 @@ fn common_parse(value: serde_json::Value) -> Result<OwnedValue> {
 }
 
 fn get_field_parsers(
-    fields: HashMap<String, FieldsConfig>,
+    fields: Vec<FieldsConfig>,
     schema_builder: &mut SchemaBuilder,
 ) -> Result<Vec<FieldParsers>> {
     let mut field_parsers: Vec<FieldParsers> = Vec::with_capacity(fields.len());
-    for (name, schema) in fields {
+    for schema in fields {
+        let name = schema.name;
         match schema.type_ {
             FieldType::Text(options) => {
                 let field = schema_builder.add_text_field(&name, options);

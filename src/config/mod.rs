@@ -5,7 +5,7 @@ pub mod ip;
 pub mod number;
 pub mod text;
 
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use color_eyre::eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -100,6 +100,8 @@ pub enum FieldType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldsConfig {
+    pub name: String,
+
     #[serde(rename = "type")]
     pub type_: FieldType,
 }
@@ -123,7 +125,7 @@ impl FieldsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IndexSchema {
     #[serde(default)]
-    pub fields: HashMap<String, FieldsConfig>,
+    pub fields: Vec<FieldsConfig>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,9 +136,8 @@ impl IndexSchema {
     pub fn get_indexed_fields(&self) -> Vec<String> {
         self.fields
             .iter()
-            .filter(|(_, v)| v.is_indexed())
-            .map(|(k, _)| k)
-            .cloned()
+            .filter(|x| x.is_indexed())
+            .map(|x| x.name.clone())
             .collect()
     }
 }
