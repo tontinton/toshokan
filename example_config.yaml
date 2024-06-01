@@ -6,8 +6,8 @@ schema:
   mappings:
     timestamp:
       type: !datetime
-      formats:
-        - timestamp
-      indexed: true
-      stored: true
-      fast: true
+        formats:
+          - timestamp
+        indexed: true
+        stored: true
+        fast: true
