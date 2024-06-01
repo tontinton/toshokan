@@ -16,6 +16,8 @@ use crate::{args::MergeArgs, merge_directory::MergeDirectory};
 
 use super::{get_index_config, open_unified_directories, write_unified_index};
 
+const MIN_TANTIVY_MEMORY: usize = 15_000_000;
+
 pub async fn run_merge(args: MergeArgs, pool: PgPool) -> Result<()> {
     let config = get_index_config(&args.name, &pool).await?;
 
@@ -34,7 +36,7 @@ pub async fn run_merge(args: MergeArgs, pool: PgPool) -> Result<()> {
     let output_dir = MmapDirectory::open(&args.merge_dir)?;
 
     let index = Index::open(MergeDirectory::new(directories, output_dir.box_clone())?)?;
-    let mut index_writer: IndexWriter = index.writer_with_num_threads(1, 15_000_000)?;
+    let mut index_writer: IndexWriter = index.writer_with_num_threads(1, MIN_TANTIVY_MEMORY)?;
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
     let segment_ids = index.searchable_segment_ids()?;
