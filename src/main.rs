@@ -181,6 +181,8 @@ async fn run_create(args: CreateArgs, pool: PgPool) -> Result<()> {
         .execute(&pool)
         .await?;
 
+    info!("Created index: {}", &config.name);
+
     Ok(())
 }
 
