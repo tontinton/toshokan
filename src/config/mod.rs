@@ -98,18 +98,10 @@ pub enum FieldType {
     DynamicObject(DynamicObjectFieldConfig),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FieldsConfig {
-    pub name: String,
-
-    #[serde(rename = "type")]
-    pub type_: FieldType,
-}
-
-impl FieldsConfig {
+impl FieldType {
     pub fn is_indexed(&self) -> bool {
         use FieldType::*;
-        match &self.type_ {
+        match &self {
             Text(config) => !matches!(config.indexed, IndexedTextFieldType::False),
             Number(config) => config.indexed,
             Boolean(config) => config.indexed,
@@ -122,10 +114,21 @@ impl FieldsConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldConfig {
+    pub name: String,
+
+    #[serde(default)]
+    pub array: bool,
+
+    #[serde(rename = "type")]
+    pub type_: FieldType,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IndexSchema {
     #[serde(default)]
-    pub fields: Vec<FieldsConfig>,
+    pub fields: Vec<FieldConfig>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -133,11 +136,11 @@ pub struct IndexSchema {
 }
 
 impl IndexSchema {
-    pub fn get_indexed_fields(&self) -> Vec<String> {
+    pub fn get_indexed_fields(&self) -> Vec<FieldConfig> {
         self.fields
             .iter()
-            .filter(|x| x.is_indexed())
-            .map(|x| x.name.clone())
+            .filter(|x| x.type_.is_indexed())
+            .cloned()
             .collect()
     }
 }

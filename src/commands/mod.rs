@@ -13,12 +13,18 @@ use color_eyre::Result;
 use futures::future::try_join_all;
 use opendal::{layers::LoggingLayer, BlockingOperator, Operator};
 use sqlx::{query, query_as, PgPool};
-use tantivy::{directory::FileSlice, Index};
+use tantivy::{directory::FileSlice, schema::IndexRecordOption, Index};
 use tokio::{io::AsyncWriteExt, task::spawn_blocking};
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
 
 use crate::{
-    config::IndexConfig,
+    config::{
+        dynamic_object::{
+            DynamicObjectFieldConfig, IndexedDynamicObjectFieldConfig,
+            IndexedDynamicObjectFieldType,
+        },
+        FastFieldNormalizerType, FieldTokenizerType, IndexConfig,
+    },
     opendal_file_handle::OpenDalFileHandle,
     unified_index::{
         file_cache::build_file_cache, unified_directory::UnifiedDirectory,
@@ -27,6 +33,18 @@ use crate::{
 };
 
 const DYNAMIC_FIELD_NAME: &str = "_dynamic";
+
+fn dynamic_field_config() -> DynamicObjectFieldConfig {
+    DynamicObjectFieldConfig {
+        stored: true,
+        fast: FastFieldNormalizerType::False,
+        indexed: IndexedDynamicObjectFieldType::Indexed(IndexedDynamicObjectFieldConfig {
+            record: IndexRecordOption::Basic,
+            tokenizer: FieldTokenizerType::Default,
+        }),
+        expand_dots: true,
+    }
+}
 
 async fn get_index_config(name: &str, pool: &PgPool) -> Result<IndexConfig> {
     let (value,): (serde_json::Value,) = query_as("SELECT config FROM indexes WHERE name=$1")

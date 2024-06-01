@@ -11,22 +11,30 @@ use tantivy::{
 };
 use tokio::{spawn, sync::mpsc::channel, task::spawn_blocking};
 
-use crate::args::SearchArgs;
+use crate::{
+    args::SearchArgs,
+    config::{FieldConfig, FieldType},
+};
 
-use super::{get_index_config, open_unified_directories, DYNAMIC_FIELD_NAME};
+use super::{dynamic_field_config, get_index_config, open_unified_directories, DYNAMIC_FIELD_NAME};
 
 fn get_prettified_json(
     doc: TantivyDocument,
     schema: &Schema,
-    field_names: &[String],
+    fields: &[FieldConfig],
 ) -> Result<String> {
     let mut named_doc = doc.to_named_doc(schema);
 
     let mut prettified_field_map = BTreeMap::new();
-    for field_name in field_names {
-        if let Some(mut field_values) = named_doc.0.remove(field_name) {
+    for field in fields {
+        if let Some(mut field_values) = named_doc.0.remove(&field.name) {
+            if field.array {
+                prettified_field_map.insert(field.name.clone(), OwnedValue::Array(field_values));
+                continue;
+            }
+
             if let Some(value) = field_values.pop() {
-                if field_name == DYNAMIC_FIELD_NAME {
+                if field.name == DYNAMIC_FIELD_NAME {
                     if let OwnedValue::Object(object) = value {
                         for (k, v) in object {
                             prettified_field_map.insert(k, v);
@@ -38,7 +46,7 @@ fn get_prettified_json(
                         ));
                     }
                 } else {
-                    prettified_field_map.insert(field_name.clone(), value);
+                    prettified_field_map.insert(field.name.clone(), value);
                 }
             }
         }
@@ -56,7 +64,11 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
 
     let indexed_field_names = {
         let mut fields = config.schema.get_indexed_fields();
-        fields.push(DYNAMIC_FIELD_NAME.to_string());
+        fields.push(FieldConfig {
+            name: DYNAMIC_FIELD_NAME.to_string(),
+            array: false,
+            type_: FieldType::DynamicObject(dynamic_field_config()),
+        });
         fields
     };
 
@@ -86,7 +98,7 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
 
             let indexed_fields = indexed_field_names
                 .iter()
-                .map(|name| schema.get_field(name))
+                .map(|field| schema.get_field(&field.name))
                 .collect::<tantivy::Result<Vec<_>>>()?;
 
             let reader = index
