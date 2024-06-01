@@ -169,6 +169,17 @@ pub struct IndexSchema {
     time_field: Option<String>,
 }
 
+impl IndexSchema {
+    pub fn get_indexed_fields(&self) -> Vec<String> {
+        self.mappings
+            .iter()
+            .filter(|(_, v)| v.is_indexed())
+            .map(|(k, _)| k)
+            .cloned()
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct IndexConfig {
     pub name: String,
