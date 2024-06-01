@@ -7,17 +7,33 @@ use super::default_true;
 #[serde(rename_all = "snake_case")]
 pub enum FastTextFieldType {
     #[default]
-    Disabled,
+    False,
+
+    /// Chops the text on according to whitespace and
+    /// punctuation, removes tokens that are too long, and lowercases
+    /// tokens.
+    True,
+
+    /// Does not process nor tokenize the text.
     Raw,
-    Lowercase,
+
+    /// Like `true`, but also applies stemming on the
+    /// resulting tokens. Stemming can improve the recall of your
+    /// search engine.
+    EnStem,
+
+    /// Splits the text on whitespaces.
+    Whitespace,
 }
 
 impl From<FastTextFieldType> for Option<&str> {
     fn from(value: FastTextFieldType) -> Self {
         match value {
-            FastTextFieldType::Disabled => None,
+            FastTextFieldType::False => None,
+            FastTextFieldType::True => Some("default"),
             FastTextFieldType::Raw => Some("raw"),
-            FastTextFieldType::Lowercase => Some("lowercase"),
+            FastTextFieldType::EnStem => Some("en_stem"),
+            FastTextFieldType::Whitespace => Some("whitespace"),
         }
     }
 }
