@@ -38,7 +38,25 @@ impl From<FastTextFieldType> for Option<&str> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TextMappingConfig {
+pub struct IndexedTextFieldConfig {
+    #[serde(default)]
+    pub record: IndexRecordOption,
+
+    #[serde(default = "default_true")]
+    pub fieldnorms: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexedTextFieldType {
+    False,
+    #[default]
+    True,
+    Indexed(IndexedTextFieldConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TextFieldConfig {
     #[serde(default = "default_true")]
     pub stored: bool,
 
@@ -46,10 +64,7 @@ pub struct TextMappingConfig {
     pub fast: FastTextFieldType,
 
     #[serde(default)]
-    pub record: IndexRecordOption,
-
-    #[serde(default = "default_true")]
-    pub fieldnorms: bool,
+    pub indexed: IndexedTextFieldType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -107,7 +122,7 @@ impl Deref for DateTimeFormats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DateTimeMappingConfig {
+pub struct DateTimeFieldConfig {
     #[serde(default = "default_true")]
     pub stored: bool,
 
@@ -123,15 +138,25 @@ pub struct DateTimeMappingConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MappingFieldType {
-    Text(TextMappingConfig),
-    Datetime(DateTimeMappingConfig),
+pub enum FieldType {
+    Text(TextFieldConfig),
+    Datetime(DateTimeFieldConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MappingConfig {
     #[serde(rename = "type")]
-    pub type_: MappingFieldType,
+    pub type_: FieldType,
+}
+
+impl MappingConfig {
+    pub fn is_indexed(&self) -> bool {
+        use FieldType::*;
+        match &self.type_ {
+            Text(config) => !matches!(config.indexed, IndexedTextFieldType::False),
+            Datetime(config) => config.indexed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -163,24 +188,32 @@ impl IndexConfig {
     }
 }
 
-impl From<TextMappingConfig> for TextOptions {
-    fn from(config: TextMappingConfig) -> Self {
+impl From<TextFieldConfig> for TextOptions {
+    fn from(config: TextFieldConfig) -> Self {
         let mut text_options = TextOptions::default();
         if config.stored {
             text_options = text_options.set_stored();
         }
         text_options = text_options.set_fast(config.fast.into());
-        text_options = text_options.set_indexing_options(
-            TextFieldIndexing::default()
-                .set_index_option(config.record)
-                .set_fieldnorms(config.fieldnorms),
-        );
+        match config.indexed {
+            IndexedTextFieldType::False => {}
+            IndexedTextFieldType::True => {
+                text_options = text_options.set_indexing_options(TextFieldIndexing::default());
+            }
+            IndexedTextFieldType::Indexed(config) => {
+                text_options = text_options.set_indexing_options(
+                    TextFieldIndexing::default()
+                        .set_index_option(config.record)
+                        .set_fieldnorms(config.fieldnorms),
+                );
+            }
+        }
         text_options
     }
 }
 
-impl From<DateTimeMappingConfig> for DateOptions {
-    fn from(config: DateTimeMappingConfig) -> Self {
+impl From<DateTimeFieldConfig> for DateOptions {
+    fn from(config: DateTimeFieldConfig) -> Self {
         let mut date_options = DateOptions::default();
         if config.stored {
             date_options = date_options.set_stored();
