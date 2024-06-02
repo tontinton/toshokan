@@ -2619,6 +2619,7 @@ dependencies = [
  "once_cell",
  "opendal",
  "pretty_env_logger",
+ "rayon",
  "serde",
  "serde_json",
  "serde_yaml",
