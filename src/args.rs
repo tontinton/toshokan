@@ -49,8 +49,9 @@ pub struct IndexArgs {
     #[clap(help = "The index name.")]
     pub name: String,
 
-    #[clap(help = "Path to the input jsonl file you want to index.")]
-    pub input_path: String,
+    #[clap(help = "Path to the input jsonl file you want to index.
+Read from stdin by not providing any file path.")]
+    pub input: Option<String>,
 
     #[clap(
         short,

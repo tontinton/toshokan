@@ -6,7 +6,7 @@ use tantivy::{
 };
 use tokio::{
     fs::{create_dir_all, File},
-    io::{AsyncBufReadExt, BufReader},
+    io::{stdin, AsyncBufReadExt, AsyncRead, BufReader},
     task::spawn_blocking,
 };
 
@@ -29,7 +29,12 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
     let mut index_writer: IndexWriter = index.writer(args.memory_budget)?;
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
-    let mut reader = BufReader::new(File::open(&args.input_path).await?);
+    let input: Box<dyn AsyncRead + Unpin> = if let Some(input) = args.input {
+        Box::new(File::open(&input).await?)
+    } else {
+        Box::new(stdin())
+    };
+    let mut reader = BufReader::new(input);
 
     let mut line = String::new();
     let mut added = 0;
