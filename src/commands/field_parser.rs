@@ -4,14 +4,29 @@ use tantivy::{
     TantivyDocument,
 };
 
-use crate::config::{number::NumberFieldType, FieldConfig, FieldType};
+use crate::config::{
+    escaped_with_parent_name, number::NumberFieldType, FieldConfig, FieldConfigs, FieldType,
+};
 
 type ParseFn = Box<dyn Fn(serde_json::Value) -> Result<OwnedValue>>;
 
+enum FieldParserVariation {
+    Value { field: Field, parse_fn: ParseFn },
+    Object(Vec<FieldParser>),
+}
+
 pub struct FieldParser {
+    /// The field name. Example: "world".
     pub name: String,
-    field: Field,
-    parse_fn: ParseFn,
+
+    /// The tantivy name flattened and escaped. Example: "hello.world".
+    /// Only used for a debug log.
+    full_name: String,
+
+    /// Whether the field is a tantivy field or an object of parsers.
+    variation: FieldParserVariation,
+
+    /// Whether the field is an array.
     is_array: bool,
 }
 
@@ -23,14 +38,31 @@ impl FieldParser {
         doc: &mut TantivyDocument,
         json_value: serde_json::Value,
     ) -> Result<()> {
-        if self.is_array {
-            let values: Vec<serde_json::Value> = serde_json::from_value(json_value)?;
-            for value in values {
-                doc.add_field_value(self.field, (self.parse_fn)(value)?);
+        match &self.variation {
+            FieldParserVariation::Value { field, parse_fn } => {
+                if self.is_array {
+                    let values: Vec<serde_json::Value> = serde_json::from_value(json_value)?;
+                    for value in values {
+                        doc.add_field_value(*field, parse_fn(value)?);
+                    }
+                } else {
+                    let value = parse_fn(json_value)?;
+                    doc.add_field_value(*field, value);
+                }
             }
-        } else {
-            let value = (self.parse_fn)(json_value)?;
-            doc.add_field_value(self.field, value);
+            FieldParserVariation::Object(parsers) => {
+                let mut json_obj: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_value(json_value)?;
+
+                for parser in parsers {
+                    let Some(json_value) = json_obj.remove(parser.name.as_str()) else {
+                        debug!("field '{}' in schema but not found", &parser.full_name);
+                        continue;
+                    };
+
+                    parser.add_parsed_field_value(doc, json_value)?;
+                }
+            }
         }
 
         Ok(())
@@ -43,22 +75,21 @@ fn common_parse(value: serde_json::Value) -> Result<OwnedValue> {
 
 fn build_parser_from_field_config(
     config: FieldConfig,
+    full_name: String,
     schema_builder: &mut SchemaBuilder,
 ) -> Result<FieldParser> {
-    let name = config.name;
-
     let (field, parse_fn): (Field, ParseFn) = match config.type_ {
         FieldType::Text(options) => {
-            let field = schema_builder.add_text_field(&name, options);
+            let field = schema_builder.add_text_field(&full_name, options);
             (field, Box::new(common_parse))
         }
         FieldType::Number(options) => {
             let field_type = options.type_.clone();
             let parse_string = options.parse_string;
             let field = match field_type {
-                NumberFieldType::U64 => schema_builder.add_u64_field(&name, options),
-                NumberFieldType::I64 => schema_builder.add_i64_field(&name, options),
-                NumberFieldType::F64 => schema_builder.add_f64_field(&name, options),
+                NumberFieldType::U64 => schema_builder.add_u64_field(&full_name, options),
+                NumberFieldType::I64 => schema_builder.add_i64_field(&full_name, options),
+                NumberFieldType::F64 => schema_builder.add_f64_field(&full_name, options),
             };
 
             (
@@ -82,7 +113,7 @@ fn build_parser_from_field_config(
         }
         FieldType::Boolean(options) => {
             let parse_string = options.parse_string;
-            let field = schema_builder.add_bool_field(&name, options);
+            let field = schema_builder.add_bool_field(&full_name, options);
             (
                 field,
                 Box::new(move |value| {
@@ -108,36 +139,60 @@ fn build_parser_from_field_config(
             )
         }
         FieldType::Datetime(options) => {
-            let field = schema_builder.add_date_field(&name, options.clone());
+            let field = schema_builder.add_date_field(&full_name, options.clone());
             (
                 field,
                 Box::new(move |value| options.formats.try_parse(value)),
             )
         }
         FieldType::Ip(options) => {
-            let field = schema_builder.add_ip_addr_field(&name, options);
+            let field = schema_builder.add_ip_addr_field(&full_name, options);
             (field, Box::new(common_parse))
         }
         FieldType::DynamicObject(options) => {
-            let field = schema_builder.add_json_field(&name, options);
+            let field = schema_builder.add_json_field(&full_name, options);
             (field, Box::new(common_parse))
+        }
+        FieldType::StaticObject(options) => {
+            let parsers = build_parsers_from_field_configs_inner(
+                options.fields,
+                schema_builder,
+                Some(full_name.clone()),
+            )?;
+            return Ok(FieldParser {
+                name: config.name,
+                full_name,
+                variation: FieldParserVariation::Object(parsers),
+                is_array: config.array,
+            });
         }
     };
 
     Ok(FieldParser {
-        name,
-        field,
-        parse_fn,
+        name: config.name,
+        full_name,
+        variation: FieldParserVariation::Value { field, parse_fn },
         is_array: config.array,
     })
 }
 
-pub fn build_parsers_from_fields_config(
-    fields: Vec<FieldConfig>,
+fn build_parsers_from_field_configs_inner(
+    fields: FieldConfigs,
     schema_builder: &mut SchemaBuilder,
+    parent_name: Option<String>,
 ) -> Result<Vec<FieldParser>> {
     fields
         .into_iter()
-        .map(|field| build_parser_from_field_config(field, schema_builder))
+        .map(|field| {
+            let name = escaped_with_parent_name(&field.name, parent_name.as_deref());
+            build_parser_from_field_config(field, name, schema_builder)
+        })
         .collect::<Result<Vec<_>>>()
+}
+
+pub fn build_parsers_from_field_configs(
+    fields: FieldConfigs,
+    schema_builder: &mut SchemaBuilder,
+) -> Result<Vec<FieldParser>> {
+    build_parsers_from_field_configs_inner(fields, schema_builder, None)
 }

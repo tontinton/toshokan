@@ -3,9 +3,10 @@ pub mod datetime;
 pub mod dynamic_object;
 pub mod ip;
 pub mod number;
+pub mod static_object;
 pub mod text;
 
-use std::path::Path;
+use std::{ops::Deref, path::Path, vec::IntoIter};
 
 use color_eyre::eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,7 @@ use self::{
     dynamic_object::DynamicObjectFieldConfig,
     ip::IpFieldConfig,
     number::NumberFieldConfig,
+    static_object::StaticObjectFieldConfig,
     text::{IndexedTextFieldType, TextFieldConfig},
 };
 
@@ -96,6 +98,7 @@ pub enum FieldType {
     Datetime(DateTimeFieldConfig),
     Ip(IpFieldConfig),
     DynamicObject(DynamicObjectFieldConfig),
+    StaticObject(StaticObjectFieldConfig),
 }
 
 impl FieldType {
@@ -110,6 +113,7 @@ impl FieldType {
             DynamicObject(config) => {
                 !matches!(config.indexed, IndexedDynamicObjectFieldType::False)
             }
+            StaticObject(_) => false,
         }
     }
 }
@@ -125,24 +129,106 @@ pub struct FieldConfig {
     pub type_: FieldType,
 }
 
+pub fn split_object_field_name(s: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut start = 0;
+
+    for (i, c) in s.char_indices().peekable() {
+        if c == '.' && (i == 0 || (i > 0 && &s[i - 1..i] != "\\")) {
+            result.push(&s[start..i]);
+            start = i + 1;
+        }
+    }
+
+    result.push(&s[start..]);
+    result
+}
+
+fn escaped_field_name(name: &str) -> String {
+    name.replace('.', "\\.")
+}
+
+pub fn unescaped_field_name(name: &str) -> String {
+    name.replace("\\.", ".")
+}
+
+pub fn escaped_with_parent_name(name: &str, parent_name: Option<&str>) -> String {
+    let escaped = escaped_field_name(name);
+    if let Some(parent_name) = parent_name {
+        format!("{}.{}", parent_name, escaped)
+    } else {
+        escaped
+    }
+}
+
+impl FieldConfig {
+    fn with_parent_name(self, parent_name: Option<&str>) -> Self {
+        Self {
+            name: escaped_with_parent_name(&self.name, parent_name),
+            array: self.array,
+            type_: self.type_,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FieldConfigs(Vec<FieldConfig>);
+
+impl IntoIterator for FieldConfigs {
+    type Item = FieldConfig;
+    type IntoIter = IntoIter<FieldConfig>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Deref for FieldConfigs {
+    type Target = Vec<FieldConfig>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FieldConfigs {
+    fn get_indexed_inner(&self, parent_name: Option<String>) -> Vec<FieldConfig> {
+        let mut indexed_fields = self
+            .iter()
+            .filter(|field| field.type_.is_indexed())
+            .cloned()
+            .map(|field| field.with_parent_name(parent_name.as_deref()))
+            .collect::<Vec<_>>();
+
+        indexed_fields.extend(
+            self.iter()
+                .filter_map(|field| {
+                    if let FieldType::StaticObject(config) = &field.type_ {
+                        let name = escaped_with_parent_name(&field.name, parent_name.as_deref());
+                        Some(config.fields.get_indexed_inner(Some(name)))
+                    } else {
+                        None
+                    }
+                })
+                .flatten(),
+        );
+
+        indexed_fields
+    }
+
+    pub fn get_indexed(&self) -> Vec<FieldConfig> {
+        self.get_indexed_inner(None)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IndexSchema {
     #[serde(default)]
-    pub fields: Vec<FieldConfig>,
+    pub fields: FieldConfigs,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     time_field: Option<String>,
-}
-
-impl IndexSchema {
-    pub fn get_indexed_fields(&self) -> Vec<FieldConfig> {
-        self.fields
-            .iter()
-            .filter(|x| x.type_.is_indexed())
-            .cloned()
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

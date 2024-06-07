@@ -17,7 +17,7 @@ use tokio::{
 
 use crate::{
     args::SearchArgs,
-    config::{FieldConfig, FieldType},
+    config::{split_object_field_name, unescaped_field_name, FieldConfig, FieldType},
 };
 
 use super::{dynamic_field_config, get_index_config, open_unified_directories, DYNAMIC_FIELD_NAME};
@@ -44,20 +44,49 @@ fn get_prettified_json(
             continue;
         };
 
-        if field.name != DYNAMIC_FIELD_NAME {
+        if field.name == DYNAMIC_FIELD_NAME {
+            let OwnedValue::Object(object) = value else {
+                return Err(eyre!(
+                    "expected {} field to be an object",
+                    DYNAMIC_FIELD_NAME
+                ));
+            };
+
+            for (k, v) in object {
+                prettified_field_map.insert(k, v);
+            }
+
+            continue;
+        }
+
+        let names = split_object_field_name(&field.name)
+            .into_iter()
+            .map(unescaped_field_name)
+            .collect::<Vec<_>>();
+        if names.len() <= 1 {
             prettified_field_map.insert(field.name.clone(), value);
             continue;
         }
 
-        let OwnedValue::Object(object) = value else {
-            return Err(eyre!(
-                "expected {} field to be an object",
-                DYNAMIC_FIELD_NAME
-            ));
-        };
+        // Prettify static object with inner fields like {"hello.world": 1}
+        // to look like: {"hello": {"world": 1}}.
 
-        for (k, v) in object {
-            prettified_field_map.insert(k, v);
+        let mut inner_map = prettified_field_map
+            .entry(names[0].to_string())
+            .or_insert(OwnedValue::Object(BTreeMap::new()));
+
+        for name in &names[1..names.len() - 1] {
+            let OwnedValue::Object(map) = inner_map else {
+                panic!("invalid state, every map is an object");
+            };
+
+            inner_map = map
+                .entry(name.to_string())
+                .or_insert(OwnedValue::Object(BTreeMap::new()));
+        }
+
+        if let OwnedValue::Object(map) = inner_map {
+            map.insert(names[names.len() - 1].to_string(), value);
         }
     }
 
@@ -103,7 +132,7 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
     let config = get_index_config(&args.name, &pool).await?;
 
     let indexed_field_names = {
-        let mut fields = config.schema.get_indexed_fields();
+        let mut fields = config.schema.fields.get_indexed();
         fields.push(FieldConfig {
             name: DYNAMIC_FIELD_NAME.to_string(),
             array: false,

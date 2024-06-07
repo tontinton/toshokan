@@ -10,7 +10,7 @@ use tokio::{
     task::spawn_blocking,
 };
 
-use crate::{args::IndexArgs, commands::field_parser::build_parsers_from_fields_config};
+use crate::{args::IndexArgs, commands::field_parser::build_parsers_from_field_configs};
 
 use super::{dynamic_field_config, get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
 
@@ -20,7 +20,7 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(DYNAMIC_FIELD_NAME, dynamic_field_config());
     let field_parsers =
-        build_parsers_from_fields_config(config.schema.fields, &mut schema_builder)?;
+        build_parsers_from_field_configs(config.schema.fields, &mut schema_builder)?;
 
     let schema = schema_builder.build();
 

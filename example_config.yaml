@@ -17,3 +17,8 @@ schema:
     - name: resource
       type: !dynamic_object
         expand_dots: true
+    - name: attributes
+      type: !static_object
+        fields:
+          - name: class
+            type: !text
