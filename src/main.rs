@@ -1,28 +1,18 @@
-mod args;
-mod bincode;
-mod commands;
-mod config;
-mod merge_directory;
-mod opendal_file_handle;
-mod unified_index;
-
 use std::time::Duration;
 
-use args::Args;
 use color_eyre::eyre::Result;
-use commands::{
-    create::run_create, drop::run_drop, index::run_index, merge::run_merge, search::run_search,
-};
 use dotenvy::dotenv;
 use pretty_env_logger::formatted_timed_builder;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tokio::runtime::Builder;
-
-use crate::args::{parse_args, SubCommand};
+use toshokan_core::{
+    args::{parse_args, Args, SubCommand},
+    commands::{
+        create::run_create, drop::run_drop, index::run_index, merge::run_merge, search::run_search,
+    },
+};
 
 extern crate pretty_env_logger;
-#[macro_use]
-extern crate log;
 
 const DEFAULT_DEBUG_LOG_LEVEL: &str = "toshokan=trace,opendal::services=info";
 const DEFAULT_RELEASE_LOG_LEVEL: &str = "toshokan=info,opendal::services=info";
