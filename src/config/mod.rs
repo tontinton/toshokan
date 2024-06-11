@@ -6,7 +6,7 @@ pub mod number;
 pub mod static_object;
 pub mod text;
 
-use std::{ops::Deref, path::Path, vec::IntoIter};
+use std::{ops::Deref, path::Path, str::FromStr, vec::IntoIter};
 
 use color_eyre::eyre::Result;
 use serde::{Deserialize, Serialize};
@@ -232,7 +232,7 @@ pub struct IndexSchema {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct IndexConfig {
+pub struct IndexConfig {
     pub name: String,
     pub path: String,
 
@@ -246,6 +246,14 @@ pub(crate) struct IndexConfig {
 impl IndexConfig {
     pub async fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
         let config_str = read_to_string(path).await?;
-        Ok(serde_yaml::from_str(&config_str)?)
+        Self::from_str(&config_str)
+    }
+}
+
+impl FromStr for IndexConfig {
+    type Err = color_eyre::Report;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(serde_yaml::from_str(s)?)
     }
 }
