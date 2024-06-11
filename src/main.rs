@@ -36,19 +36,19 @@ async fn async_main(args: Args) -> Result<()> {
 
     match args.subcmd {
         SubCommand::Create(create_args) => {
-            run_create(create_args, pool).await?;
+            run_create(create_args, &pool).await?;
         }
         SubCommand::Drop(drop_args) => {
-            run_drop(drop_args, pool).await?;
+            run_drop(drop_args, &pool).await?;
         }
         SubCommand::Index(index_args) => {
-            run_index(index_args, pool).await?;
+            run_index(index_args, &pool).await?;
         }
         SubCommand::Merge(merge_args) => {
-            run_merge(merge_args, pool).await?;
+            run_merge(merge_args, &pool).await?;
         }
         SubCommand::Search(search_args) => {
-            run_search(search_args, pool).await?;
+            run_search(search_args, &pool).await?;
         }
     }
 

@@ -6,9 +6,12 @@ use crate::{
     config::{FieldType, IndexConfig},
 };
 
-pub async fn run_create(args: CreateArgs, pool: PgPool) -> Result<()> {
+pub async fn run_create(args: CreateArgs, pool: &PgPool) -> Result<()> {
     let config = IndexConfig::from_path(&args.config_path).await?;
+    run_create_from_config(&config, pool).await
+}
 
+pub async fn run_create_from_config(config: &IndexConfig, pool: &PgPool) -> Result<()> {
     let array_static_object_exists = config
         .schema
         .fields
@@ -20,8 +23,8 @@ pub async fn run_create(args: CreateArgs, pool: PgPool) -> Result<()> {
 
     query("INSERT INTO indexes (name, config) VALUES ($1, $2)")
         .bind(&config.name)
-        .bind(&serde_json::to_value(&config)?)
-        .execute(&pool)
+        .bind(&serde_json::to_value(config)?)
+        .execute(pool)
         .await?;
 
     info!("Created index: {}", &config.name);
