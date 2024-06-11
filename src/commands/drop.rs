@@ -8,13 +8,13 @@ use crate::args::DropArgs;
 
 use super::get_index_path;
 
-pub async fn run_drop(args: DropArgs, pool: PgPool) -> Result<()> {
-    let base_path = get_index_path(&args.name, &pool).await?;
+pub async fn run_drop(args: DropArgs, pool: &PgPool) -> Result<()> {
+    let base_path = get_index_path(&args.name, pool).await?;
 
     let file_names: Vec<(String,)> =
         query_as("SELECT file_name FROM index_files WHERE index_name=$1")
             .bind(&args.name)
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await?;
     let file_names_len = file_names.len();
 
@@ -30,7 +30,7 @@ pub async fn run_drop(args: DropArgs, pool: PgPool) -> Result<()> {
 
     query("DELETE FROM indexes WHERE name=$1")
         .bind(&args.name)
-        .execute(&pool)
+        .execute(pool)
         .await?;
 
     info!(

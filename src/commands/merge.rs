@@ -18,10 +18,10 @@ use super::{get_index_config, open_unified_directories, write_unified_index};
 
 const MIN_TANTIVY_MEMORY: usize = 15_000_000;
 
-pub async fn run_merge(args: MergeArgs, pool: PgPool) -> Result<()> {
-    let config = get_index_config(&args.name, &pool).await?;
+pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
+    let config = get_index_config(&args.name, pool).await?;
 
-    let (ids, directories): (Vec<_>, Vec<_>) = open_unified_directories(&config.path, &pool)
+    let (ids, directories): (Vec<_>, Vec<_>) = open_unified_directories(&config.path, pool)
         .await?
         .into_iter()
         .map(|(id, dir)| (id, dir.box_clone()))
@@ -47,11 +47,11 @@ pub async fn run_merge(args: MergeArgs, pool: PgPool) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.merge_dir, &config.name, &config.path, &pool).await?;
+    write_unified_index(index, &args.merge_dir, &config.name, &config.path, pool).await?;
 
     let delete_result = query("DELETE FROM index_files WHERE id = ANY($1)")
         .bind(&ids)
-        .execute(&pool)
+        .execute(pool)
         .await;
 
     for id in ids {

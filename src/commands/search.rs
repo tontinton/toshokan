@@ -108,7 +108,11 @@ where
     rx
 }
 
-pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
+pub async fn run_search_with_callback(
+    args: SearchArgs,
+    pool: &PgPool,
+    on_doc_fn: Box<dyn Fn(String) + Send>,
+) -> Result<()> {
     if args.limit == 0 {
         return Ok(());
     }
@@ -129,7 +133,7 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
         })
         .build()?;
 
-    let config = get_index_config(&args.name, &pool).await?;
+    let config = get_index_config(&args.name, pool).await?;
 
     let indexed_field_names = {
         let mut fields = config.schema.fields.get_indexed();
@@ -141,7 +145,7 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
         fields
     };
 
-    let directories = open_unified_directories(&config.path, &pool)
+    let directories = open_unified_directories(&config.path, pool)
         .await?
         .into_iter()
         .map(|(_, x)| x)
@@ -197,7 +201,7 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
     let mut rx_handle = spawn(async move {
         let mut i = 0;
         while let Some(doc) = rx.recv().await {
-            println!("{}", doc);
+            on_doc_fn(doc);
             i += 1;
             if i == args.limit {
                 break;
@@ -225,4 +229,15 @@ pub async fn run_search(args: SearchArgs, pool: PgPool) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub async fn run_search(args: SearchArgs, pool: &PgPool) -> Result<()> {
+    run_search_with_callback(
+        args,
+        pool,
+        Box::new(|doc| {
+            println!("{}", doc);
+        }),
+    )
+    .await
 }

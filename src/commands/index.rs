@@ -14,8 +14,8 @@ use crate::{args::IndexArgs, commands::field_parser::build_parsers_from_field_co
 
 use super::{dynamic_field_config, get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
 
-pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
-    let config = get_index_config(&args.name, &pool).await?;
+pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
+    let config = get_index_config(&args.name, pool).await?;
 
     let mut schema_builder = Schema::builder();
     let dynamic_field = schema_builder.add_json_field(DYNAMIC_FIELD_NAME, dynamic_field_config());
@@ -30,8 +30,10 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
     let input: Box<dyn AsyncRead + Unpin> = if let Some(input) = args.input {
+        debug!("reading from '{}'", &input);
         Box::new(File::open(&input).await?)
     } else {
+        debug!("reading from stdin");
         Box::new(stdin())
     };
     let mut reader = BufReader::new(input);
@@ -78,7 +80,7 @@ pub async fn run_index(args: IndexArgs, pool: PgPool) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.build_dir, &config.name, &config.path, &pool).await?;
+    write_unified_index(index, &args.build_dir, &config.name, &config.path, pool).await?;
 
     Ok(())
 }
