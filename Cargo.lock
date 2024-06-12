@@ -3080,6 +3080,7 @@ name = "toshokan"
 version = "0.1.0"
 dependencies = [
  "async-tempfile",
+ "async-trait",
  "bincode",
  "clap",
  "color-eyre",
