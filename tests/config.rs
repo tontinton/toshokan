@@ -52,6 +52,22 @@ schema:
     "*",
     r#"{"array":[1,2,3,4]}"#
 )]
+#[case(
+    "
+name: boolean_test
+path: /tmp/toshokan_boolean
+schema:
+  fields:
+    - name: something
+      type: !boolean
+",
+    r#"
+    {"something":true}
+    {"something":false}
+    "#,
+    "something:false",
+    r#"{"something":false}"#
+)]
 #[trace]
 #[tokio::test]
 async fn test_config(
