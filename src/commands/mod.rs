@@ -1,6 +1,6 @@
 pub mod create;
 pub mod drop;
-pub mod field_parser;
+mod field_parser;
 pub mod index;
 pub mod merge;
 pub mod search;
