@@ -7,6 +7,7 @@ use std::{
 
 use bincode::Options;
 use color_eyre::eyre::{bail, Result};
+use futures::future::try_join_all;
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncWrite},
@@ -44,10 +45,12 @@ impl UnifiedIndexWriter {
         dir: &Path,
         file_names: HashSet<PathBuf>,
     ) -> std::io::Result<Self> {
-        let mut file_readers = Vec::with_capacity(file_names.len());
-        for file_name in file_names {
-            file_readers.push(FileReader::from_path(dir, file_name).await?);
-        }
+        let file_readers = try_join_all(
+            file_names
+                .into_iter()
+                .map(|file_name| FileReader::from_path(dir, file_name)),
+        )
+        .await?;
         Ok(Self::new(file_readers))
     }
 
