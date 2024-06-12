@@ -109,7 +109,7 @@ async fn open_unified_directories(
 }
 
 async fn write_unified_index(
-    index: Index,
+    index: &Index,
     input_dir: &str,
     index_name: &str,
     index_dir: &str,

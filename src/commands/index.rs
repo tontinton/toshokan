@@ -80,7 +80,7 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(index, &args.build_dir, &config.name, &config.path, pool).await?;
+    write_unified_index(&index, &args.build_dir, &config.name, &config.path, pool).await?;
 
     Ok(())
 }
