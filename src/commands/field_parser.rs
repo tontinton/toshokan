@@ -58,7 +58,7 @@ impl FieldParser {
 
                 for parser in parsers {
                     let Some(json_value) = json_obj.remove(parser.name.as_str()) else {
-                        debug!("field '{}' in schema but not found", &parser.full_name);
+                        debug!("Field '{}' in schema but not found", &parser.full_name);
                         continue;
                     };
 

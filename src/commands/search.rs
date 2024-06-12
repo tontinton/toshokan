@@ -128,7 +128,7 @@ pub async fn run_search_with_callback(
                 "?".to_string()
             };
 
-            error!("task in search thread pool panicked: {}", msg);
+            error!("Task in search thread pool panicked: {}", msg);
             eprintln!("Backtrace: {}", Backtrace::capture());
         })
         .build()?;
@@ -217,7 +217,7 @@ pub async fn run_search_with_callback(
             }
             Either::Right(((result, i, _), _)) => {
                 if let Ok(Err(e)) = result {
-                    error!("error in search task({i}): {e}");
+                    error!("Error in search task({i}): {e}");
                 }
 
                 tx_handles.remove(i);

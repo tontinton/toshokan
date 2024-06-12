@@ -112,13 +112,13 @@ impl DateTimeFormats {
                 }
                 Err(e) => {
                     debug!(
-                        "failed to parse using the {:?} datetime format: {}",
+                        "Failed to parse using the {:?} datetime format: {}",
                         format, e
                     );
                 }
             }
         }
-        Err(eyre!("none of the datetime formats was able to parse"))
+        Err(eyre!("None of the datetime formats was able to parse"))
     }
 }
 
