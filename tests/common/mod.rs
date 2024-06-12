@@ -1,8 +1,3 @@
-use std::{
-    fs::canonicalize,
-    path::{Path, PathBuf},
-};
-
 use color_eyre::Result;
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions, PgPool};
 use testcontainers::{runners::AsyncRunner, ContainerAsync};
@@ -41,15 +36,4 @@ pub async fn run_postgres() -> Result<Postgres> {
         _container: container,
         pool,
     })
-}
-
-pub fn get_test_file_path(test_file: &str) -> PathBuf {
-    canonicalize(&Path::new(file!()))
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("test_files")
-        .join(test_file)
 }
