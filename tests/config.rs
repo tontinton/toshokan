@@ -68,6 +68,23 @@ schema:
     "something:false",
     r#"{"something":false}"#
 )]
+#[case(
+    "
+name: ip_test
+path: /tmp/toshokan_ip
+schema:
+  fields:
+    - name: something
+      type: !ip
+",
+    r#"
+    {"something":"127.0.0.1"}
+    {"something":"2001:db8::ff00:42:8329"}
+    {"something":"192.168.0.1"}
+    "#,
+    "something:[190.0.0.1 TO 195.200.10.1]",
+    r#"{"something":"192.168.0.1"}"#
+)]
 #[trace]
 #[tokio::test]
 async fn test_config(
