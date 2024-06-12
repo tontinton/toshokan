@@ -1,6 +1,6 @@
 mod common;
 
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 use async_tempfile::TempFile;
 use clap::Parser;
@@ -9,7 +9,11 @@ use ctor::ctor;
 use pretty_env_logger::formatted_timed_builder;
 use rstest::rstest;
 use tempfile::TempDir;
-use tokio::{io::AsyncWriteExt, sync::mpsc};
+use tokio::{
+    fs::{read_dir, remove_dir_all},
+    io::AsyncWriteExt,
+    sync::mpsc,
+};
 use toshokan::{
     args::{DropArgs, IndexArgs, SearchArgs},
     commands::{
@@ -28,6 +32,17 @@ fn init() {
     let mut log_builder = formatted_timed_builder();
     log_builder.parse_filters("toshokan=trace,opendal::services=info");
     log_builder.try_init().unwrap();
+}
+
+async fn get_number_of_files_in_dir<P: AsRef<Path>>(dir: P) -> std::io::Result<usize> {
+    let mut file_count = 0;
+    let mut entries = read_dir(dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        if entry.file_type().await?.is_file() {
+            file_count += 1;
+        }
+    }
+    Ok(file_count)
 }
 
 #[rstest]
@@ -129,6 +144,9 @@ async fn test_config(
     let postgres = run_postgres().await?;
     let config = IndexConfig::from_str(raw_config)?;
 
+    // Just in case this path already exists, remove it.
+    let _ = remove_dir_all(&config.path).await;
+
     run_create_from_config(&config, &postgres.pool).await?;
 
     let temp_build_dir = TempDir::new()?;
@@ -147,6 +165,8 @@ async fn test_config(
     )
     .await?;
 
+    assert_eq!(get_number_of_files_in_dir(&config.path).await?, 1);
+
     let (tx, mut rx) = mpsc::channel(1);
     run_search_with_callback(
         SearchArgs::parse_from(["", &config.name, query, "--limit", "1"]),
@@ -160,6 +180,8 @@ async fn test_config(
     assert_eq!(rx.recv().await.unwrap(), expected_output);
 
     run_drop(DropArgs::parse_from(["", &config.name]), &postgres.pool).await?;
+
+    assert_eq!(get_number_of_files_in_dir(&config.path).await?, 0);
 
     Ok(())
 }
