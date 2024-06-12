@@ -2,13 +2,14 @@ mod common;
 
 use std::str::FromStr;
 
+use async_tempfile::TempFile;
 use clap::Parser;
 use color_eyre::Result;
 use ctor::ctor;
 use pretty_env_logger::formatted_timed_builder;
 use rstest::rstest;
 use tempfile::TempDir;
-use tokio::sync::mpsc;
+use tokio::{io::AsyncWriteExt, sync::mpsc};
 use toshokan::{
     args::{DropArgs, IndexArgs, SearchArgs},
     commands::{
@@ -18,7 +19,7 @@ use toshokan::{
     config::IndexConfig,
 };
 
-use crate::common::{get_test_file_path, run_postgres};
+use crate::common::run_postgres;
 
 #[ctor]
 fn init() {
@@ -32,7 +33,7 @@ fn init() {
 #[rstest]
 #[case(
     include_str!("../example_config.yaml"),
-    "hdfs-logs-multitenants-2.json",
+    include_str!("test_files/hdfs-logs-multitenants-2.json"),
     "tenant_id:>50 AND severity_text:INFO",
     r#"{"attributes":{"class":"org.apache.hadoop.hdfs.server.datanode.DataNode"},"body":"PacketResponder: BP-108841162-10.10.34.11-1440074360971:blk_1074072698_331874, type=HAS_DOWNSTREAM_IN_PIPELINE terminating","resource":{"service":"datanode/01"},"severity_text":"INFO","tenant_id":58,"timestamp":"2016-04-13T06:46:53Z"}"#,
 )]
@@ -47,15 +48,15 @@ schema:
       type: !number
         type: u64
 ",
-    "array.json",
-    "*",
     r#"{"array":[1,2,3,4]}"#,
+    "*",
+    r#"{"array":[1,2,3,4]}"#
 )]
 #[trace]
 #[tokio::test]
 async fn test_config(
     #[case] raw_config: &str,
-    #[case] index_test_file: &str,
+    #[case] index_input: &str,
     #[case] query: &str,
     #[case] expected_output: &str,
 ) -> Result<()> {
@@ -64,16 +65,17 @@ async fn test_config(
 
     run_create_from_config(&config, &postgres.pool).await?;
 
-    let temp_dir = TempDir::new()?;
-    let temp_path = temp_dir.path().to_string_lossy();
+    let temp_build_dir = TempDir::new()?;
+    let mut index_file = TempFile::new().await?;
+    index_file.write_all(index_input.trim().as_bytes()).await?;
 
     run_index(
         IndexArgs::parse_from([
             "",
             &config.name,
-            &get_test_file_path(index_test_file).to_string_lossy(),
+            &index_file.file_path().to_string_lossy(),
             "--build-dir",
-            &temp_path,
+            &temp_build_dir.path().to_string_lossy(),
         ]),
         &postgres.pool,
     )
