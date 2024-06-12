@@ -41,9 +41,9 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
     let mut line = String::new();
     let mut added = 0;
 
-    loop {
         let len = reader.read_line(&mut line).await?;
         if len == 0 {
+    'reader_loop: loop {
             break;
         }
 
@@ -59,6 +59,7 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
 
             if let Err(e) = field_parser.add_parsed_field_value(&mut doc, json_value) {
                 error!("{}: failed to parse '{}': {}", added, &name, e);
+                continue 'reader_loop;
             }
         }
 
