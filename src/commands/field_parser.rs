@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use color_eyre::{eyre::eyre, Result};
 use tantivy::{
     schema::{Field, OwnedValue, SchemaBuilder},
@@ -147,7 +149,18 @@ fn build_parser_from_field_config(
         }
         FieldType::Ip(options) => {
             let field = schema_builder.add_ip_addr_field(&full_name, options);
-            (field, Box::new(common_parse))
+            (
+                field,
+                Box::new(move |value| {
+                    let ip_str = serde_json::from_value::<String>(value)?;
+                    let addr = ip_str.parse::<IpAddr>()?;
+                    let ipv6 = match addr {
+                        IpAddr::V4(ip) => ip.to_ipv6_mapped(),
+                        IpAddr::V6(ip) => ip,
+                    };
+                    Ok(OwnedValue::IpAddr(ipv6))
+                }),
+            )
         }
         FieldType::DynamicObject(options) => {
             let field = schema_builder.add_json_field(&full_name, options);
