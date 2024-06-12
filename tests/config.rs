@@ -85,6 +85,35 @@ schema:
     "something:[190.0.0.1 TO 195.200.10.1]",
     r#"{"something":"192.168.0.1"}"#
 )]
+#[case(
+    "
+name: parse_string_test
+path: /tmp/toshokan_parse_string
+schema:
+  fields:
+    - name: negative
+      type: !number
+        type: i64
+        parse_string: true
+    - name: positive
+      type: !number
+        type: u64
+        parse_string: true
+    - name: float
+      type: !number
+        type: f64
+        parse_string: true
+    - name: boolean
+      type: !boolean
+        parse_string: true
+",
+    r#"
+    {"negative": "-100", "positive": "100", "float": "25.52",  "boolean": "FaLsE"}
+    {"negative": "100",  "positive": "500", "float": "-25.52", "boolean": "trUe"}
+    "#,
+    "negative:<0",
+    r#"{"boolean":false,"float":25.52,"negative":-100,"positive":100}"#
+)]
 #[trace]
 #[tokio::test]
 async fn test_config(
