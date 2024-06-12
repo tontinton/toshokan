@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Tony Solomonik @ tony.solomonik@gmail.com"]
 
+[profile.dev.package.backtrace]
+opt-level = 3
+
 [profile.release]
 strip = true
 lto = true
