@@ -39,6 +39,7 @@ fn init() {
 )]
 #[case(
     "
+version: 1
 name: array_test
 path: /tmp/toshokan_array
 schema:
@@ -54,6 +55,7 @@ schema:
 )]
 #[case(
     "
+version: 1
 name: boolean_test
 path: /tmp/toshokan_boolean
 schema:
@@ -70,6 +72,7 @@ schema:
 )]
 #[case(
     "
+version: 1
 name: ip_test
 path: /tmp/toshokan_ip
 schema:
@@ -87,6 +90,7 @@ schema:
 )]
 #[case(
     "
+version: 1
 name: parse_string_test
 path: /tmp/toshokan_parse_string
 schema:
