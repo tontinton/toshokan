@@ -1,7 +1,7 @@
 use std::{backtrace::Backtrace, collections::BTreeMap};
 
 use color_eyre::{eyre::eyre, Result};
-use futures::future::{select, select_all, Either};
+use futures::future::select_all;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use sqlx::PgPool;
 use tantivy::{
@@ -11,7 +11,7 @@ use tantivy::{
     Document, Index, ReloadPolicy, TantivyDocument,
 };
 use tokio::{
-    spawn,
+    select, spawn,
     sync::{mpsc, oneshot},
 };
 
@@ -211,11 +211,11 @@ pub async fn run_search_with_callback(
     });
 
     loop {
-        match select(&mut rx_handle, select_all(&mut tx_handles)).await {
-            Either::Left(..) => {
+        select! {
+            _ = &mut rx_handle => {
                 break;
             }
-            Either::Right(((result, i, _), _)) => {
+            (result, i, _) = select_all(&mut tx_handles) => {
                 if let Ok(Err(e)) = result {
                     error!("Error in search task({i}): {e}");
                 }
@@ -225,7 +225,7 @@ pub async fn run_search_with_callback(
                     break;
                 }
             }
-        };
+        }
     }
 
     Ok(())
