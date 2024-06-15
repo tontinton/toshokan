@@ -90,7 +90,7 @@ fn run_consumer_thread(consumer: KafkaConsumer, tx: mpsc::Sender<Result<Option<V
 }
 
 impl KafkaSource {
-    pub fn from_url(url: &str) -> Result<Self> {
+    pub fn from_url(url: &str, stream: bool) -> Result<Self> {
         let (servers, topic) = parse_url(url)?;
 
         let log_level = if cfg!(debug_assertions) {
@@ -102,9 +102,13 @@ impl KafkaSource {
         let consumer: KafkaConsumer = ClientConfig::new()
             .set("bootstrap.servers", servers)
             .set("session.timeout.ms", "6000") // Minimum allowed timeout.
-            .set("auto.offset.reset", "earliest")
+            .set(
+                "auto.offset.reset",
+                // Stream will seek to offset saved in checkpoint in the future.
+                if stream { "latest" } else { "earliest" },
+            )
             .set("enable.auto.commit", "false")
-            .set("enable.partition.eof", "true")
+            .set("enable.partition.eof", (!stream).to_string())
             .set("group.id", topic) // Consumer group per topic for now.
             .set_log_level(log_level)
             .create_with_context(KafkaContext)

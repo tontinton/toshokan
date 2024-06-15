@@ -1,4 +1,11 @@
+use std::time::Duration;
+
 use clap::Parser;
+use humantime::parse_duration;
+
+fn parse_humantime(s: &str) -> Result<Duration, String> {
+    parse_duration(s).map_err(|e| format!("Failed to parse duration: {}. Please refer to https://docs.rs/humantime/2.1.0/humantime/fn.parse_duration.html", e))
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -52,6 +59,24 @@ pub struct IndexArgs {
     #[clap(help = "Path to the input jsonl file you want to index.
 Read from stdin by not providing any file path.")]
     pub input: Option<String>,
+
+    #[clap(
+        short,
+        long,
+        help = "Whether to stream from the source without terminating. Will stop only once the source is closed.",
+        default_value = "false"
+    )]
+    pub stream: bool,
+
+    #[clap(
+        long,
+        help = "How much time to collect docs from the source until an index file should be generated.
+Only used when streaming.
+Examples: '5s 500ms', '2m 10s'.",
+        default_value = "30s",
+        value_parser = parse_humantime
+    )]
+    pub commit_interval: Duration,
 
     #[clap(
         short,
