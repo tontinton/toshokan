@@ -8,7 +8,6 @@ use color_eyre::Result;
 use ctor::ctor;
 use pretty_env_logger::formatted_timed_builder;
 use rstest::rstest;
-use tempfile::TempDir;
 use tokio::{
     fs::{read_dir, remove_dir_all},
     io::AsyncWriteExt,
@@ -149,18 +148,11 @@ async fn test_config(
 
     run_create_from_config(&config, &postgres.pool).await?;
 
-    let temp_build_dir = TempDir::new()?;
     let mut index_file = TempFile::new().await?;
     index_file.write_all(index_input.trim().as_bytes()).await?;
 
     run_index(
-        IndexArgs::parse_from([
-            "",
-            &config.name,
-            &index_file.file_path().to_string_lossy(),
-            "--build-dir",
-            &temp_build_dir.path().to_string_lossy(),
-        ]),
+        IndexArgs::parse_from(["", &config.name, &index_file.file_path().to_string_lossy()]),
         &postgres.pool,
     )
     .await?;
