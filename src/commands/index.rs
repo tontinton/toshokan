@@ -70,6 +70,11 @@ async fn pipe_source_to_index(
         added += 1;
     }
 
+    if added == 0 {
+        debug!("Not writing index: no documents added");
+        return Ok(());
+    }
+
     info!("Commiting {added} documents");
     index_writer.prepare_commit()?.commit_future().await?;
 
