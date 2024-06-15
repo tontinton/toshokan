@@ -45,6 +45,6 @@ impl Source for BufSource {
 
         let map = serde_json::from_str(&self.line)?;
         self.line.clear();
-        return Ok(map);
+        Ok(map)
     }
 }
