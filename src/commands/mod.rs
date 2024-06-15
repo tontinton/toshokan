@@ -148,7 +148,7 @@ async fn write_unified_index(
     query(
         "INSERT INTO index_files (id, index_name, file_name, footer_len) VALUES ($1, $2, $3, $4)",
     )
-    .bind(&id)
+    .bind(id)
     .bind(index_name)
     .bind(&file_name)
     .bind(footer_len as i64)

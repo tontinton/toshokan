@@ -3,28 +3,36 @@ use std::path::Path;
 use color_eyre::Result;
 use sqlx::PgPool;
 use tantivy::{
-    directory::MmapDirectory, indexer::NoMergePolicy, schema::Schema, Index, IndexWriter,
-    TantivyDocument,
+    directory::MmapDirectory,
+    indexer::NoMergePolicy,
+    schema::{Field, Schema},
+    Index, IndexWriter, TantivyDocument,
 };
 use tokio::{fs::create_dir_all, task::spawn_blocking};
 
 use crate::{
     args::IndexArgs,
-    commands::{field_parser::build_parsers_from_field_configs, sources::connect_to_source},
+    commands::{
+        field_parser::build_parsers_from_field_configs,
+        sources::{connect_to_source, Source},
+    },
+    config::IndexConfig,
 };
 
-use super::{dynamic_field_config, get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
+use super::{
+    dynamic_field_config, field_parser::FieldParser, get_index_config, write_unified_index,
+    DYNAMIC_FIELD_NAME,
+};
 
-pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
-    let config = get_index_config(&args.name, pool).await?;
-
-    let mut schema_builder = Schema::builder();
-    let dynamic_field = schema_builder.add_json_field(DYNAMIC_FIELD_NAME, dynamic_field_config());
-    let field_parsers =
-        build_parsers_from_field_configs(config.schema.fields, &mut schema_builder)?;
-
-    let schema = schema_builder.build();
-
+async fn pipe_source_to_index(
+    source: &mut Box<dyn Source>,
+    schema: Schema,
+    field_parsers: &[FieldParser],
+    dynamic_field: Field,
+    args: &IndexArgs,
+    config: &IndexConfig,
+    pool: &PgPool,
+) -> Result<()> {
     let id = uuid::Uuid::now_v7().hyphenated().to_string();
     let index_dir = Path::new(&args.build_dir).join(&id);
     let _ = create_dir_all(&index_dir).await;
@@ -32,7 +40,6 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
     let mut index_writer: IndexWriter = index.writer(args.memory_budget)?;
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
-    let mut source = connect_to_source(args.input.as_deref()).await?;
     let mut added = 0;
 
     'reader_loop: loop {
@@ -42,7 +49,7 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
 
         let mut doc = TantivyDocument::new();
 
-        for field_parser in &field_parsers {
+        for field_parser in field_parsers {
             let name = &field_parser.name;
             let Some(json_value) = json_obj.remove(name) else {
                 debug!("Field '{}' in schema but not found", &name);
@@ -75,6 +82,31 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
     write_unified_index(&id, &index, &index_dir, &config.name, &config.path, pool).await?;
+
+    Ok(())
+}
+
+pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
+    let config = get_index_config(&args.name, pool).await?;
+
+    let mut schema_builder = Schema::builder();
+    let dynamic_field = schema_builder.add_json_field(DYNAMIC_FIELD_NAME, dynamic_field_config());
+    let field_parsers =
+        build_parsers_from_field_configs(&config.schema.fields, &mut schema_builder)?;
+    let schema = schema_builder.build();
+
+    let mut source = connect_to_source(args.input.as_deref()).await?;
+
+    pipe_source_to_index(
+        &mut source,
+        schema,
+        &field_parsers,
+        dynamic_field,
+        &args,
+        &config,
+        pool,
+    )
+    .await?;
 
     Ok(())
 }

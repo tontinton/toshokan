@@ -204,8 +204,8 @@ fn build_parsers_from_field_configs_inner(
 }
 
 pub fn build_parsers_from_field_configs(
-    fields: FieldConfigs,
+    fields: &FieldConfigs,
     schema_builder: &mut SchemaBuilder,
 ) -> Result<Vec<FieldParser>> {
-    build_parsers_from_field_configs_inner(fields, schema_builder, None)
+    build_parsers_from_field_configs_inner(fields.clone(), schema_builder, None)
 }

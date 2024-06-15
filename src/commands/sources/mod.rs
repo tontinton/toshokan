@@ -16,7 +16,7 @@ pub trait Source {
     async fn get_one(&mut self) -> Result<Option<JsonMap>>;
 }
 
-pub async fn connect_to_source(input: Option<&str>) -> Result<Box<dyn Source + Unpin>> {
+pub async fn connect_to_source(input: Option<&str>) -> Result<Box<dyn Source>> {
     Ok(match input {
         Some(url) if url.starts_with(KAFKA_PREFIX) => Box::new(KafkaSource::from_url(url)?),
         Some(path) => Box::new(BufSource::from_path(path).await?),
