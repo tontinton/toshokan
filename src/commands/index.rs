@@ -8,7 +8,7 @@ use tokio::{fs::create_dir_all, task::spawn_blocking};
 
 use crate::{
     args::IndexArgs,
-    commands::{field_parser::build_parsers_from_field_configs, json_reader::build_json_reader},
+    commands::{field_parser::build_parsers_from_field_configs, sources::get_source},
 };
 
 use super::{dynamic_field_config, get_index_config, write_unified_index, DYNAMIC_FIELD_NAME};
@@ -28,11 +28,11 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
     let mut index_writer: IndexWriter = index.writer(args.memory_budget)?;
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
-    let mut reader = build_json_reader(args.input.as_deref()).await?;
+    let mut source = get_source(args.input.as_deref()).await?;
     let mut added = 0;
 
     'reader_loop: loop {
-        let Some(mut json_obj) = reader.next().await? else {
+        let Some(mut json_obj) = source.next().await? else {
             break;
         };
 
