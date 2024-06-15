@@ -32,8 +32,10 @@ pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
         return Ok(());
     }
 
-    let _ = create_dir(&args.merge_dir).await;
-    let output_dir = MmapDirectory::open(&args.merge_dir)?;
+    let id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let index_dir = Path::new(&args.merge_dir).join(&id);
+    let _ = create_dir(&index_dir).await;
+    let output_dir = MmapDirectory::open(&index_dir)?;
 
     let index = Index::open(MergeDirectory::new(directories, output_dir.box_clone())?)?;
     let mut index_writer: IndexWriter = index.writer_with_num_threads(1, MIN_TANTIVY_MEMORY)?;
@@ -47,7 +49,7 @@ pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(&index, &args.merge_dir, &config.name, &config.path, pool).await?;
+    write_unified_index(&id, &index, &index_dir, &config.name, &config.path, pool).await?;
 
     let delete_result = query("DELETE FROM index_files WHERE id = ANY($1)")
         .bind(&ids)
