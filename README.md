@@ -1,11 +1,12 @@
 ```sh
 cargo run -- create example_config.yaml
 
+# Index a json file delimited by new lines.
 cargo run -- index test ~/hdfs-logs-multitenants-10000.json
-# Commiting 10000 documents, after processing 10000
-# Merging 3 segments
-# Joining merging threads
-# Writing unified index file
+
+# Index json records from kafka.
+# Every --commit-interval, whatever was read from the source is written to a new index file.
+cargo run -- index test kafka://localhost:9092/topic --stream
 
 cargo run -- search test "tenant_id:[60 TO 65} AND severity_text:INFO" --limit 1 | jq .
 # {
