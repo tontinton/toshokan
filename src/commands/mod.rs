@@ -2,9 +2,9 @@ pub mod create;
 pub mod drop;
 mod field_parser;
 pub mod index;
-mod json_reader;
 pub mod merge;
 pub mod search;
+mod sources;
 
 use std::{
     path::{Path, PathBuf},

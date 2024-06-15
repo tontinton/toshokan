@@ -5,28 +5,24 @@ use tokio::{
     io::{stdin, AsyncBufReadExt, AsyncRead, BufReader},
 };
 
-type JsonMap = serde_json::Map<String, serde_json::Value>;
+use super::{JsonMap, Source};
+
 type AsyncBufReader = BufReader<Box<dyn AsyncRead + Send + Sync + Unpin>>;
 
-#[async_trait]
-pub trait JsonReader {
-    async fn next(&mut self) -> Result<Option<JsonMap>>;
-}
-
-struct BufJsonReader {
+pub struct BufSource {
     reader: AsyncBufReader,
     line: String,
 }
 
-impl BufJsonReader {
-    async fn from_path(path: &str) -> std::io::Result<Self> {
+impl BufSource {
+    pub async fn from_path(path: &str) -> std::io::Result<Self> {
         debug!("Reading from '{}'", path);
         Ok(Self::from_buf_reader(BufReader::new(Box::new(
             File::open(&path).await?,
         ))))
     }
 
-    fn from_stdin() -> Self {
+    pub fn from_stdin() -> Self {
         debug!("Reading from stdin");
         Self::from_buf_reader(BufReader::new(Box::new(stdin())))
     }
@@ -40,7 +36,7 @@ impl BufJsonReader {
 }
 
 #[async_trait]
-impl JsonReader for BufJsonReader {
+impl Source for BufSource {
     async fn next(&mut self) -> Result<Option<JsonMap>> {
         let len = self.reader.read_line(&mut self.line).await?;
         if len == 0 {
@@ -51,11 +47,4 @@ impl JsonReader for BufJsonReader {
         self.line.clear();
         return Ok(map);
     }
-}
-
-pub async fn build_json_reader(input: Option<&str>) -> Result<Box<dyn JsonReader + Unpin>> {
-    Ok(match input {
-        Some(path) => Box::new(BufJsonReader::from_path(path).await?),
-        None => Box::new(BufJsonReader::from_stdin()),
-    })
 }
