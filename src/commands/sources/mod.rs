@@ -13,7 +13,7 @@ type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 #[async_trait]
 pub trait Source {
-    async fn next(&mut self) -> Result<Option<JsonMap>>;
+    async fn get_one(&mut self) -> Result<Option<JsonMap>>;
 }
 
 pub async fn get_source(input: Option<&str>) -> Result<Box<dyn Source + Unpin>> {
