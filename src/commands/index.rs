@@ -32,7 +32,7 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
     let mut added = 0;
 
     'reader_loop: loop {
-        let Some(mut json_obj) = source.next().await? else {
+        let Some(mut json_obj) = source.get_one().await? else {
             break;
         };
 

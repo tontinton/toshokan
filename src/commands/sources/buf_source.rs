@@ -37,7 +37,7 @@ impl BufSource {
 
 #[async_trait]
 impl Source for BufSource {
-    async fn next(&mut self) -> Result<Option<JsonMap>> {
+    async fn get_one(&mut self) -> Result<Option<JsonMap>> {
         let len = self.reader.read_line(&mut self.line).await?;
         if len == 0 {
             return Ok(None);

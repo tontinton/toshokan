@@ -125,7 +125,7 @@ impl KafkaSource {
 
 #[async_trait]
 impl Source for KafkaSource {
-    async fn next(&mut self) -> Result<Option<JsonMap>> {
+    async fn get_one(&mut self) -> Result<Option<JsonMap>> {
         let Some(result) = self.messages_rx.recv().await else {
             return Ok(None);
         };
