@@ -8,7 +8,7 @@ use tantivy::{
     schema::{Field, Schema},
     Index, IndexWriter, TantivyDocument,
 };
-use tokio::{fs::create_dir_all, task::spawn_blocking};
+use tokio::{fs::create_dir_all, select, task::spawn_blocking, time::sleep};
 
 use crate::{
     args::IndexArgs,
@@ -42,9 +42,27 @@ async fn pipe_source_to_index(
 
     let mut added = 0;
 
+    let commit_timeout = sleep(args.commit_interval);
+    tokio::pin!(commit_timeout);
+
     'reader_loop: loop {
-        let Some(mut json_obj) = source.get_one().await? else {
-            break;
+        let mut json_obj = if args.stream {
+            select! {
+                _ = &mut commit_timeout => {
+                    break;
+                }
+                maybe_json_obj = source.get_one() => {
+                    let Some(json_obj) = maybe_json_obj? else {
+                        break;
+                    };
+                    json_obj
+                }
+            }
+        } else {
+            let Some(json_obj) = source.get_one().await? else {
+                break;
+            };
+            json_obj
         };
 
         let mut doc = TantivyDocument::new();
@@ -100,18 +118,33 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
         build_parsers_from_field_configs(&config.schema.fields, &mut schema_builder)?;
     let schema = schema_builder.build();
 
-    let mut source = connect_to_source(args.input.as_deref()).await?;
+    let mut source = connect_to_source(args.input.as_deref(), args.stream).await?;
 
-    pipe_source_to_index(
-        &mut source,
-        schema,
-        &field_parsers,
-        dynamic_field,
-        &args,
-        &config,
-        pool,
-    )
-    .await?;
+    if args.stream {
+        loop {
+            pipe_source_to_index(
+                &mut source,
+                schema.clone(),
+                &field_parsers,
+                dynamic_field,
+                &args,
+                &config,
+                pool,
+            )
+            .await?;
+        }
+    } else {
+        pipe_source_to_index(
+            &mut source,
+            schema,
+            &field_parsers,
+            dynamic_field,
+            &args,
+            &config,
+            pool,
+        )
+        .await?;
+    }
 
     Ok(())
 }

@@ -4,9 +4,6 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Tony Solomonik @ tony.solomonik@gmail.com"]
 
-[profile.dev.package.backtrace]
-opt-level = 3
-
 [profile.release]
 strip = true
 lto = true
@@ -22,6 +19,7 @@ clap = { version = "4.5.4", features = ["derive"] }
 color-eyre = { version = "0.6.3", default-features = false }
 dotenvy = "0.15.7"
 futures = "0.3.30"
+humantime = "2.1.0"
 log = "0.4.21"
 once_cell = "1.19.0"
 opendal = { version = "0.46.0", features = ["services-fs"] }
