@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use color_eyre::Result;
 use sqlx::PgPool;
 use tantivy::{
@@ -23,8 +25,10 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
 
     let schema = schema_builder.build();
 
-    let _ = create_dir_all(&args.build_dir).await;
-    let index = Index::open_or_create(MmapDirectory::open(&args.build_dir)?, schema)?;
+    let id = uuid::Uuid::now_v7().hyphenated().to_string();
+    let index_dir = Path::new(&args.build_dir).join(&id);
+    let _ = create_dir_all(&index_dir).await;
+    let index = Index::open_or_create(MmapDirectory::open(&index_dir)?, schema)?;
     let mut index_writer: IndexWriter = index.writer(args.memory_budget)?;
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
@@ -70,7 +74,7 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
 
     spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
-    write_unified_index(&index, &args.build_dir, &config.name, &config.path, pool).await?;
+    write_unified_index(&id, &index, &index_dir, &config.name, &config.path, pool).await?;
 
     Ok(())
 }

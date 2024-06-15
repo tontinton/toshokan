@@ -110,8 +110,9 @@ async fn open_unified_directories(
 }
 
 async fn write_unified_index(
+    id: &str,
     index: &Index,
-    input_dir: &str,
+    input_dir: &Path,
     index_name: &str,
     index_dir: &str,
     pool: &PgPool,
@@ -119,11 +120,9 @@ async fn write_unified_index(
     let cloned_input_dir = PathBuf::from(input_dir);
     let file_cache = spawn_blocking(move || build_file_cache(&cloned_input_dir)).await??;
 
-    let unified_index_writer = UnifiedIndexWriter::from_file_paths(
-        Path::new(input_dir),
-        index.directory().list_managed_files(),
-    )
-    .await?;
+    let unified_index_writer =
+        UnifiedIndexWriter::from_file_paths(input_dir, index.directory().list_managed_files())
+            .await?;
 
     let mut builder = opendal::services::Fs::default();
     builder.root(index_dir);
@@ -132,7 +131,6 @@ async fn write_unified_index(
         .layer(LoggingLayer::default())
         .finish();
 
-    let id = uuid::Uuid::now_v7();
     let file_name = format!("{}.index", id);
     let mut writer = op
         .writer_with(&file_name)
@@ -150,7 +148,7 @@ async fn write_unified_index(
     query(
         "INSERT INTO index_files (id, index_name, file_name, footer_len) VALUES ($1, $2, $3, $4)",
     )
-    .bind(&id.to_string())
+    .bind(&id)
     .bind(index_name)
     .bind(&file_name)
     .bind(footer_len as i64)
