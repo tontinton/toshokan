@@ -32,7 +32,7 @@ async fn pipe_source_to_index(
     args: &IndexArgs,
     config: &IndexConfig,
     pool: &PgPool,
-) -> Result<()> {
+) -> Result<bool> {
     let id = uuid::Uuid::now_v7().hyphenated().to_string();
     let index_dir = Path::new(&args.build_dir).join(&id);
     let _ = create_dir_all(&index_dir).await;
@@ -45,10 +45,13 @@ async fn pipe_source_to_index(
     let commit_timeout = sleep(args.commit_interval);
     tokio::pin!(commit_timeout);
 
+    let mut did_timeout = false;
+
     'reader_loop: loop {
         let mut json_obj = if args.stream {
             select! {
                 _ = &mut commit_timeout => {
+                    did_timeout = true;
                     break;
                 }
                 maybe_json_obj = source.get_one() => {
@@ -90,7 +93,7 @@ async fn pipe_source_to_index(
 
     if added == 0 {
         debug!("Not writing index: no documents added");
-        return Ok(());
+        return Ok(did_timeout);
     }
 
     info!("Commiting {added} documents");
@@ -106,7 +109,7 @@ async fn pipe_source_to_index(
 
     write_unified_index(&id, &index, &index_dir, &config.name, &config.path, pool).await?;
 
-    Ok(())
+    Ok(did_timeout)
 }
 
 pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
@@ -120,31 +123,17 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
 
     let mut source = connect_to_source(args.input.as_deref(), args.stream).await?;
 
-    if args.stream {
-        loop {
-            pipe_source_to_index(
-                &mut source,
-                schema.clone(),
-                &field_parsers,
-                dynamic_field,
-                &args,
-                &config,
-                pool,
-            )
-            .await?;
-        }
-    } else {
-        pipe_source_to_index(
-            &mut source,
-            schema,
-            &field_parsers,
-            dynamic_field,
-            &args,
-            &config,
-            pool,
-        )
-        .await?;
-    }
+    while pipe_source_to_index(
+        &mut source,
+        schema.clone(),
+        &field_parsers,
+        dynamic_field,
+        &args,
+        &config,
+        pool,
+    )
+    .await?
+    {}
 
     Ok(())
 }

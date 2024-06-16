@@ -25,11 +25,6 @@ pub async fn connect_to_source(input: Option<&str>, stream: bool) -> Result<Box<
             }
             Box::new(BufSource::from_path(path).await?)
         }
-        None => {
-            if stream {
-                bail!("Streaming from stdin is not supported.");
-            }
-            Box::new(BufSource::from_stdin())
-        }
+        None => Box::new(BufSource::from_stdin()),
     })
 }
