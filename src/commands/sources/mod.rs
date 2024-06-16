@@ -11,9 +11,20 @@ use self::{
 
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
+pub enum SourceItem {
+    /// A document to index.
+    Document(JsonMap),
+
+    /// The source is closed, can't read more from it.
+    Close,
+
+    /// The source decided to reload from the last checkpoint (example: kafka rebalance).
+    Restart,
+}
+
 #[async_trait]
 pub trait Source {
-    async fn get_one(&mut self) -> Result<Option<JsonMap>>;
+    async fn get_one(&mut self) -> Result<SourceItem>;
 }
 
 pub async fn connect_to_source(input: Option<&str>, stream: bool) -> Result<Box<dyn Source>> {

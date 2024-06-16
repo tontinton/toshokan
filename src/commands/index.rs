@@ -1,6 +1,7 @@
-use std::path::Path;
+use std::{path::Path, pin::Pin};
 
 use color_eyre::Result;
+use futures::{future::pending, Future};
 use sqlx::PgPool;
 use tantivy::{
     directory::MmapDirectory,
@@ -8,13 +9,18 @@ use tantivy::{
     schema::{Field, Schema},
     Index, IndexWriter, TantivyDocument,
 };
-use tokio::{fs::create_dir_all, select, task::spawn_blocking, time::sleep};
+use tokio::{
+    fs::{create_dir_all, remove_dir_all},
+    select,
+    task::spawn_blocking,
+    time::sleep,
+};
 
 use crate::{
     args::IndexArgs,
     commands::{
         field_parser::build_parsers_from_field_configs,
-        sources::{connect_to_source, Source},
+        sources::{connect_to_source, Source, SourceItem},
     },
     config::IndexConfig,
 };
@@ -41,31 +47,41 @@ async fn pipe_source_to_index(
     index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
     let mut added = 0;
-
-    let commit_timeout = sleep(args.commit_interval);
-    tokio::pin!(commit_timeout);
-
     let mut did_timeout = false;
 
+    let mut commit_timeout_fut: Pin<Box<dyn Future<Output = ()>>> = if args.stream {
+        Box::pin(sleep(args.commit_interval))
+    } else {
+        // Infinite timeout by waiting on a future that never resolves.
+        Box::pin(pending::<()>())
+    };
+
+    debug!("Piping source -> index of id '{}'", &id);
+
     'reader_loop: loop {
-        let mut json_obj = if args.stream {
-            select! {
-                _ = &mut commit_timeout => {
-                    did_timeout = true;
-                    break;
-                }
-                maybe_json_obj = source.get_one() => {
-                    let Some(json_obj) = maybe_json_obj? else {
-                        break;
-                    };
-                    json_obj
-                }
-            }
-        } else {
-            let Some(json_obj) = source.get_one().await? else {
+        let item = select! {
+            _ = &mut commit_timeout_fut => {
+                did_timeout = true;
                 break;
-            };
-            json_obj
+            }
+            item = source.get_one() => {
+                item?
+            }
+        };
+
+        let mut json_obj = match item {
+            SourceItem::Document(json_obj) => json_obj,
+            SourceItem::Close => {
+                debug!("Source closed for index of id '{}'", &id);
+                break;
+            }
+            SourceItem::Restart => {
+                debug!("Aborting index of id '{}' with {} documents", &id, added);
+                if let Err(e) = remove_dir_all(&index_dir).await {
+                    warn!("Failed to remove aborted index of id '{}': {}", &id, e);
+                }
+                return Ok(true);
+            }
         };
 
         let mut doc = TantivyDocument::new();

@@ -5,7 +5,7 @@ use tokio::{
     io::{stdin, AsyncBufReadExt, AsyncRead, BufReader},
 };
 
-use super::{JsonMap, Source};
+use super::{Source, SourceItem};
 
 type AsyncBufReader = BufReader<Box<dyn AsyncRead + Send + Sync + Unpin>>;
 
@@ -37,14 +37,14 @@ impl BufSource {
 
 #[async_trait]
 impl Source for BufSource {
-    async fn get_one(&mut self) -> Result<Option<JsonMap>> {
+    async fn get_one(&mut self) -> Result<SourceItem> {
         let len = self.reader.read_line(&mut self.line).await?;
         if len == 0 {
-            return Ok(None);
+            return Ok(SourceItem::Close);
         }
 
         let map = serde_json::from_str(&self.line)?;
         self.line.clear();
-        Ok(map)
+        Ok(SourceItem::Document(map))
     }
 }
