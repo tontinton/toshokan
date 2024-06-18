@@ -189,7 +189,14 @@ impl KafkaSource {
             )
             .set("enable.auto.commit", "false")
             .set("enable.partition.eof", (!stream).to_string())
-            .set("group.id", format!("toshokan_{topic}")) // Consumer group per topic for now.
+            // Consumer group per topic for now. Separate stream and batch.
+            .set(
+                "group.id",
+                format!(
+                    "toshokan_{}_{topic}",
+                    if stream { "stream" } else { "batch" }
+                ),
+            )
             .set_log_level(log_level)
             .create_with_context(KafkaContext {
                 topic: topic.to_string(),
