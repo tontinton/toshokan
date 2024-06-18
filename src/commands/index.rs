@@ -125,6 +125,8 @@ async fn pipe_source_to_index(
 
     write_unified_index(&id, &index, &index_dir, &config.name, &config.path, pool).await?;
 
+    source.on_index_created().await?;
+
     Ok(did_timeout)
 }
 
@@ -137,7 +139,7 @@ pub async fn run_index(args: IndexArgs, pool: &PgPool) -> Result<()> {
         build_parsers_from_field_configs(&config.schema.fields, &mut schema_builder)?;
     let schema = schema_builder.build();
 
-    let mut source = connect_to_source(args.input.as_deref(), args.stream).await?;
+    let mut source = connect_to_source(args.input.as_deref(), args.stream, pool).await?;
 
     while pipe_source_to_index(
         &mut source,

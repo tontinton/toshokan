@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use async_trait::async_trait;
 use color_eyre::{
@@ -11,24 +11,29 @@ use rdkafka::{
     error::KafkaError,
     ClientConfig, ClientContext, Message, Offset,
 };
+use sqlx::PgPool;
 use tokio::{
     sync::{mpsc, oneshot},
     task::spawn_blocking,
 };
 
-use super::{Source, SourceItem};
+use super::{kafka_checkpoint::Checkpoint, Source, SourceItem};
 
 pub const KAFKA_PREFIX: &str = "kafka://";
 const CONSUMER_THREAD_MESSAGES_CHANNEL_SIZE: usize = 10;
 const POLL_DURATION: Duration = Duration::from_secs(1);
 
 enum MessageFromConsumerThread {
-    Payload(Vec<u8>),
+    Payload {
+        bytes: Vec<u8>,
+        partition: i32,
+        offset: i64,
+    },
     Eof,
     PreRebalance,
     PostRebalance {
         partitions: Vec<i32>,
-        offsets_tx: oneshot::Sender<Vec<Offset>>,
+        checkpoint_tx: oneshot::Sender<Vec<(i32, Option<i64>)>>,
     },
 }
 
@@ -60,36 +65,50 @@ impl ConsumerContext for KafkaContext {
                     return;
                 }
 
-                let partitions = tpl
-                    .elements()
-                    .iter()
-                    .map(|x| x.partition())
-                    .collect::<Vec<_>>();
+                // elements() panics when tpl is empty, so we check capacity.
+                let partitions = if tpl.capacity() > 0 {
+                    tpl.elements()
+                        .iter()
+                        .map(|x| {
+                            assert_eq!(x.topic(), self.topic);
+                            x.partition()
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
 
                 let (tx, rx) = oneshot::channel();
                 let msg = MessageFromConsumerThread::PostRebalance {
-                    partitions: partitions.clone(),
-                    offsets_tx: tx,
+                    partitions,
+                    checkpoint_tx: tx,
                 };
                 if let Err(e) = self.messages_tx.blocking_send(Ok(msg)) {
                     error!("Failed to send post-rebalance event: {e}");
                     return;
                 }
 
-                let offsets_result = rx.blocking_recv();
-                if let Err(e) = offsets_result {
+                let checkpoint_result = rx.blocking_recv();
+                if let Err(e) = checkpoint_result {
                     error!("Failed to recv post-rebalance offsets: {e}");
                     return;
                 }
-                let offsets = offsets_result.unwrap();
+                let partitions_and_offsets = checkpoint_result.unwrap();
 
-                for (id, offset) in partitions.into_iter().zip(offsets) {
+                for (id, offset) in partitions_and_offsets {
                     let Some(mut partition) = tpl.find_partition(&self.topic, id) else {
                         warn!("Partition id '{id}' not found?");
                         continue;
                     };
-                    if let Err(e) = partition.set_offset(offset) {
-                        warn!("Failed to set offset to '{offset:?}' for partition id '{id}': {e}");
+
+                    let rdkafka_offset = if let Some(offset) = offset {
+                        Offset::Offset(offset)
+                    } else {
+                        Offset::Beginning
+                    };
+
+                    if let Err(e) = partition.set_offset(rdkafka_offset) {
+                        warn!("Failed to set offset to '{rdkafka_offset:?}' for partition id '{id}': {e}");
                     }
                 }
             }
@@ -104,6 +123,8 @@ type KafkaConsumer = BaseConsumer<KafkaContext>;
 
 pub struct KafkaSource {
     messages_rx: mpsc::Receiver<Result<MessageFromConsumerThread>>,
+    checkpoint: Option<Checkpoint>,
+    partition_to_offset: BTreeMap<i32, i64>,
 }
 
 fn parse_url(url: &str) -> Result<(&str, &str)> {
@@ -156,7 +177,11 @@ fn run_consumer_thread(
             }
 
             let msg = msg
-                .map(|x| MessageFromConsumerThread::Payload(x.payload().unwrap().to_vec()))
+                .map(|x| MessageFromConsumerThread::Payload {
+                    bytes: x.payload().unwrap().to_vec(),
+                    partition: x.partition(),
+                    offset: x.offset(),
+                })
                 .map_err(|e| Report::new(e));
 
             if let Err(e) = tx.blocking_send(msg) {
@@ -168,7 +193,7 @@ fn run_consumer_thread(
 }
 
 impl KafkaSource {
-    pub fn from_url(url: &str, stream: bool) -> Result<Self> {
+    pub fn from_url(url: &str, stream: bool, pool: &PgPool) -> Result<Self> {
         let (servers, topic) = parse_url(url)?;
 
         let log_level = if cfg!(debug_assertions) {
@@ -213,7 +238,18 @@ impl KafkaSource {
 
         run_consumer_thread(consumer, tx);
 
-        Ok(Self { messages_rx: rx })
+        let checkpoint = if stream {
+            // Url is not a good identifier as a source id, but we'll live with it for now.
+            Some(Checkpoint::new(url.to_string(), pool.clone()))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            messages_rx: rx,
+            checkpoint,
+            partition_to_offset: BTreeMap::new(),
+        })
     }
 }
 
@@ -226,7 +262,12 @@ impl Source for KafkaSource {
             };
 
             match msg? {
-                MessageFromConsumerThread::Payload(bytes) => {
+                MessageFromConsumerThread::Payload {
+                    bytes,
+                    partition,
+                    offset,
+                } => {
+                    self.partition_to_offset.insert(partition, offset);
                     break SourceItem::Document(serde_json::from_slice(&bytes)?);
                 }
                 MessageFromConsumerThread::Eof => {
@@ -235,15 +276,42 @@ impl Source for KafkaSource {
                 MessageFromConsumerThread::PreRebalance => {
                     break SourceItem::Restart;
                 }
-                MessageFromConsumerThread::PostRebalance{partitions, offsets_tx} => {
-                    if offsets_tx
-                        .send(partitions.into_iter().map(|_| Offset::Stored).collect())
-                        .is_err()
-                    {
+                MessageFromConsumerThread::PostRebalance {
+                    partitions,
+                    checkpoint_tx,
+                } => {
+                    let Some(ref checkpoint) = self.checkpoint else {
+                        continue;
+                    };
+
+                    let partitions_and_offsets = checkpoint
+                        .load(&partitions)
+                        .await
+                        .context("failed to load checkpoint")?;
+                    if checkpoint_tx.send(partitions_and_offsets).is_err() {
                         bail!("failed to respond with partition offsets, kafka consumer thread probably closed")
                     }
+
+                    self.partition_to_offset.clear();
                 }
             }
         })
+    }
+
+    async fn on_index_created(&mut self) -> Result<()> {
+        let Some(ref checkpoint) = self.checkpoint else {
+            return Ok(());
+        };
+
+        let flat = self
+            .partition_to_offset
+            .iter()
+            .map(|(p, o)| (*p, *o))
+            .collect::<Vec<_>>();
+        checkpoint.save(&flat).await?;
+
+        self.partition_to_offset.clear();
+
+        Ok(())
     }
 }
