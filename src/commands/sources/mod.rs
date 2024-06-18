@@ -1,8 +1,10 @@
 mod buf_source;
+mod kafka_checkpoint;
 mod kafka_source;
 
 use async_trait::async_trait;
 use color_eyre::{eyre::bail, Result};
+use sqlx::PgPool;
 
 use self::{
     buf_source::BufSource,
@@ -24,12 +26,23 @@ pub enum SourceItem {
 
 #[async_trait]
 pub trait Source {
+    /// Get a document from the source.
     async fn get_one(&mut self) -> Result<SourceItem>;
+
+    /// Called when an index file was just created to notify the source.
+    /// Useful for implementing checkpoints for example.
+    async fn on_index_created(&mut self) -> Result<()>;
 }
 
-pub async fn connect_to_source(input: Option<&str>, stream: bool) -> Result<Box<dyn Source>> {
+pub async fn connect_to_source(
+    input: Option<&str>,
+    stream: bool,
+    pool: &PgPool,
+) -> Result<Box<dyn Source>> {
     Ok(match input {
-        Some(url) if url.starts_with(KAFKA_PREFIX) => Box::new(KafkaSource::from_url(url, stream)?),
+        Some(url) if url.starts_with(KAFKA_PREFIX) => {
+            Box::new(KafkaSource::from_url(url, stream, pool)?)
+        }
         Some(path) => {
             if stream {
                 bail!("Streaming from a file is not currently supported.");

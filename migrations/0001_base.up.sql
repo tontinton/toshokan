@@ -9,3 +9,11 @@ CREATE TABLE IF NOT EXISTS index_files(
     file_name TEXT NOT NULL,
     footer_len BIGINT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS kafka_checkpoints(
+    source_id TEXT NOT NULL,
+    partition INT NOT NULL,
+    offset_value BIGINT NOT NULL,
+
+    PRIMARY KEY (source_id, partition)
+);
