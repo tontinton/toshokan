@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS indexes(
     name TEXT PRIMARY KEY,
-    config jsonb NOT NULL
+    config JSONB NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS index_files(
