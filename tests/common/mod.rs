@@ -1,4 +1,5 @@
 use color_eyre::Result;
+use pretty_env_logger::formatted_timed_builder;
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions, PgPool};
 use testcontainers::{runners::AsyncRunner, ContainerAsync};
 use testcontainers_modules::postgres::Postgres as PostgresContainer;
@@ -36,4 +37,12 @@ pub async fn run_postgres() -> Result<Postgres> {
         _container: container,
         pool,
     })
+}
+
+pub fn test_init() {
+    color_eyre::install().unwrap();
+
+    let mut log_builder = formatted_timed_builder();
+    log_builder.parse_filters("toshokan=trace,opendal::services=info");
+    log_builder.try_init().unwrap();
 }
