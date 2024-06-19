@@ -6,7 +6,6 @@ use async_tempfile::TempFile;
 use clap::Parser;
 use color_eyre::Result;
 use ctor::ctor;
-use pretty_env_logger::formatted_timed_builder;
 use rstest::rstest;
 use tokio::{
     fs::{read_dir, remove_dir_all},
@@ -22,15 +21,11 @@ use toshokan::{
     config::IndexConfig,
 };
 
-use crate::common::run_postgres;
+use crate::common::{run_postgres, test_init};
 
 #[ctor]
 fn init() {
-    color_eyre::install().unwrap();
-
-    let mut log_builder = formatted_timed_builder();
-    log_builder.parse_filters("toshokan=trace,opendal::services=info");
-    log_builder.try_init().unwrap();
+    test_init();
 }
 
 async fn get_number_of_files_in_dir<P: AsRef<Path>>(dir: P) -> std::io::Result<usize> {
