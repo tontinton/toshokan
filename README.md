@@ -1,14 +1,14 @@
 ```sh
-cargo run -- create example_config.yaml
+toshokan create example_config.yaml
 
 # Index a json file delimited by new lines.
-cargo run -- index test ~/hdfs-logs-multitenants-10000.json
+toshokan index test ~/hdfs-logs-multitenants-10000.json
 
 # Index json records from kafka.
 # Every --commit-interval, whatever was read from the source is written to a new index file.
-cargo run -- index test kafka://localhost:9092/topic --stream
+toshokan index test kafka://localhost:9092/topic --stream
 
-cargo run -- search test "tenant_id:[60 TO 65} AND severity_text:INFO" --limit 1 | jq .
+toshokan search test "tenant_id:[60 TO 65} AND severity_text:INFO" --limit 1 | jq .
 # {
 #   "attributes": {
 #     "class": "org.apache.hadoop.hdfs.server.datanode.DataNode.clienttrace"
@@ -22,5 +22,5 @@ cargo run -- search test "tenant_id:[60 TO 65} AND severity_text:INFO" --limit 1
 #   "timestamp": "2016-04-13T06:46:54Z"
 # }
 
-cargo run -- drop test
+toshokan drop test
 ```
