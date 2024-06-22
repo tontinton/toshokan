@@ -36,7 +36,7 @@ jobs:
         uses: ./.github/actions/cache-setup
 
       - name: Unit tests
-        run: RUST_BACKTRACE=1 cargo test --all
+        run: RUST_BACKTRACE=1 RSTEST_TIMEOUT=30 cargo test --all
 
   lint:
     name: rustfmt + clippy
