@@ -151,6 +151,11 @@ pub async fn run_search_with_callback(
         .map(|(_, x)| x)
         .collect::<Vec<_>>();
 
+    if directories.is_empty() {
+        info!("No index files for '{}'", &args.name);
+        return Ok(());
+    }
+
     let mut tx_handles = Vec::with_capacity(directories.len());
     let (tx, mut rx) = mpsc::channel(args.limit);
 
