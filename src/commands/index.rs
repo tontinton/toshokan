@@ -49,6 +49,15 @@ pub struct IndexRunner {
 
 impl IndexRunner {
     pub async fn new(args: IndexArgs, pool: PgPool) -> Result<Self> {
+        let source = connect_to_source(args.input.as_deref(), args.stream, &pool).await?;
+        IndexRunner::new_with_source(args, pool, source).await
+    }
+
+    pub async fn new_with_source(
+        args: IndexArgs,
+        pool: PgPool,
+        source: Box<dyn Source + Send + Sync>,
+    ) -> Result<Self> {
         let config = get_index_config(&args.name, &pool).await?;
 
         let mut schema_builder = Schema::builder();
@@ -57,8 +66,6 @@ impl IndexRunner {
         let field_parsers =
             build_parsers_from_field_configs(&config.schema.fields, &mut schema_builder)?;
         let schema = schema_builder.build();
-
-        let source = connect_to_source(args.input.as_deref(), args.stream, &pool).await?;
 
         Ok(Self {
             source,

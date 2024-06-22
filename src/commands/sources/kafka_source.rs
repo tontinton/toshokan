@@ -23,6 +23,34 @@ pub const KAFKA_PREFIX: &str = "kafka://";
 const CONSUMER_THREAD_MESSAGES_CHANNEL_SIZE: usize = 10;
 const POLL_DURATION: Duration = Duration::from_secs(1);
 
+macro_rules! track_saved_checkpoint_impl {
+    ( $self:ident, $partitions_and_offsets:ident ) => {
+        #[cfg(feature = "in-tests")]
+        {
+            $self.saved_partitions_and_offsets = $partitions_and_offsets.to_vec();
+        }
+
+        #[cfg(not(feature = "in-tests"))]
+        {
+            // No-op when not in tests.
+        }
+    };
+}
+
+macro_rules! track_loaded_checkpoint_impl {
+    ( $self:ident, $partitions_and_offsets:ident ) => {
+        #[cfg(feature = "in-tests")]
+        {
+            $self.loaded_partitions_and_offsets = $partitions_and_offsets.to_vec();
+        }
+
+        #[cfg(not(feature = "in-tests"))]
+        {
+            // No-op when not in tests.
+        }
+    };
+}
+
 struct PostRebalance {
     partitions: Vec<i32>,
     checkpoint_tx: oneshot::Sender<Vec<(i32, Option<i64>)>>,
@@ -129,6 +157,11 @@ pub struct KafkaSource {
     messages_rx: mpsc::Receiver<Result<MessageFromConsumerThread>>,
     checkpoint: Option<Checkpoint>,
     partition_to_offset: BTreeMap<i32, i64>,
+
+    #[cfg(feature = "in-tests")]
+    pub saved_partitions_and_offsets: Vec<(i32, i64)>,
+    #[cfg(feature = "in-tests")]
+    pub loaded_partitions_and_offsets: Vec<(i32, Option<i64>)>,
 }
 
 pub fn parse_url(url: &str) -> Result<(&str, &str)> {
@@ -253,6 +286,11 @@ impl KafkaSource {
             messages_rx: rx,
             checkpoint,
             partition_to_offset: BTreeMap::new(),
+
+            #[cfg(feature = "in-tests")]
+            saved_partitions_and_offsets: Vec::new(),
+            #[cfg(feature = "in-tests")]
+            loaded_partitions_and_offsets: Vec::new(),
         };
 
         this.wait_for_assignment()
@@ -285,6 +323,9 @@ impl KafkaSource {
             .load(&msg.partitions)
             .await
             .context("failed to load checkpoint")?;
+
+        self.track_loaded_checkpoint(&partitions_and_offsets);
+
         if msg.checkpoint_tx.send(partitions_and_offsets).is_err() {
             bail!("failed to respond with partition offsets, kafka consumer thread probably closed")
         }
@@ -292,6 +333,14 @@ impl KafkaSource {
         self.partition_to_offset.clear();
 
         Ok(())
+    }
+
+    fn track_saved_checkpoint(&mut self, partitions_and_offsets: Vec<(i32, i64)>) {
+        track_saved_checkpoint_impl!(self, partitions_and_offsets);
+    }
+
+    fn track_loaded_checkpoint(&mut self, partitions_and_offsets: &[(i32, Option<i64>)]) {
+        track_loaded_checkpoint_impl!(self, partitions_and_offsets);
     }
 }
 
@@ -337,6 +386,8 @@ impl Source for KafkaSource {
             .map(|(p, o)| (*p, *o + 1))
             .collect::<Vec<_>>();
         checkpoint.save(&flat).await?;
+
+        self.track_saved_checkpoint(flat);
 
         self.partition_to_offset.clear();
 
