@@ -146,6 +146,9 @@ impl IndexRunner {
 
         if added == 0 {
             debug!("Not writing index: no documents added");
+            if let Err(e) = remove_dir_all(&index_dir).await {
+                warn!("Failed to remove empty index of id '{}': {}", &id, e);
+            }
             return Ok(result);
         }
 
