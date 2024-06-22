@@ -333,7 +333,8 @@ impl Source for KafkaSource {
         let flat = self
             .partition_to_offset
             .iter()
-            .map(|(p, o)| (*p, *o))
+            // Add 1 as we don't want to seek to the last record already read, but the next.
+            .map(|(p, o)| (*p, *o + 1))
             .collect::<Vec<_>>();
         checkpoint.save(&flat).await?;
 
