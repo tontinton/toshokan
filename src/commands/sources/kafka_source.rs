@@ -23,6 +23,11 @@ pub const KAFKA_PREFIX: &str = "kafka://";
 const CONSUMER_THREAD_MESSAGES_CHANNEL_SIZE: usize = 10;
 const POLL_DURATION: Duration = Duration::from_secs(1);
 
+struct PostRebalance {
+    partitions: Vec<i32>,
+    checkpoint_tx: oneshot::Sender<Vec<(i32, Option<i64>)>>,
+}
+
 enum MessageFromConsumerThread {
     Payload {
         bytes: Vec<u8>,
@@ -31,10 +36,7 @@ enum MessageFromConsumerThread {
     },
     Eof,
     PreRebalance,
-    PostRebalance {
-        partitions: Vec<i32>,
-        checkpoint_tx: oneshot::Sender<Vec<(i32, Option<i64>)>>,
-    },
+    PostRebalance(PostRebalance),
 }
 
 struct KafkaContext {
@@ -52,6 +54,7 @@ impl ConsumerContext for KafkaContext {
                 if self.ignore_rebalance {
                     return;
                 }
+                debug!("Got revoke event");
 
                 if let Err(e) = self
                     .messages_tx
@@ -64,6 +67,7 @@ impl ConsumerContext for KafkaContext {
                 if self.ignore_rebalance {
                     return;
                 }
+                debug!("Got assignment event");
 
                 // elements() panics when tpl is empty, so we check capacity.
                 let partitions = if tpl.capacity() > 0 {
@@ -79,10 +83,10 @@ impl ConsumerContext for KafkaContext {
                 };
 
                 let (tx, rx) = oneshot::channel();
-                let msg = MessageFromConsumerThread::PostRebalance {
+                let msg = MessageFromConsumerThread::PostRebalance(PostRebalance {
                     partitions,
                     checkpoint_tx: tx,
-                };
+                });
                 if let Err(e) = self.messages_tx.blocking_send(Ok(msg)) {
                     error!("Failed to send post-rebalance event: {e}");
                     return;
@@ -127,7 +131,7 @@ pub struct KafkaSource {
     partition_to_offset: BTreeMap<i32, i64>,
 }
 
-fn parse_url(url: &str) -> Result<(&str, &str)> {
+pub fn parse_url(url: &str) -> Result<(&str, &str)> {
     if !url.starts_with(KAFKA_PREFIX) {
         return Err(eyre!("'{}' does not start with {}", url, KAFKA_PREFIX));
     }
@@ -193,7 +197,7 @@ fn run_consumer_thread(
 }
 
 impl KafkaSource {
-    pub fn from_url(url: &str, stream: bool, pool: &PgPool) -> Result<Self> {
+    pub async fn from_url(url: &str, stream: bool, pool: &PgPool) -> Result<Self> {
         let (servers, topic) = parse_url(url)?;
 
         let log_level = if cfg!(debug_assertions) {
@@ -245,11 +249,49 @@ impl KafkaSource {
             None
         };
 
-        Ok(Self {
+        let mut this = Self {
             messages_rx: rx,
             checkpoint,
             partition_to_offset: BTreeMap::new(),
-        })
+        };
+
+        this.wait_for_assignment()
+            .await
+            .context("first message got is not an assignment message")?;
+
+        Ok(this)
+    }
+
+    async fn wait_for_assignment(&mut self) -> Result<()> {
+        let Some(msg) = self.messages_rx.recv().await else {
+            bail!("kafka consumer thread closed")
+        };
+
+        let MessageFromConsumerThread::PostRebalance(msg) = msg? else {
+            bail!("got a non assignment message");
+        };
+
+        self.handle_post_rebalance_msg(msg).await?;
+
+        Ok(())
+    }
+
+    async fn handle_post_rebalance_msg(&mut self, msg: PostRebalance) -> Result<()> {
+        let Some(ref checkpoint) = self.checkpoint else {
+            return Ok(());
+        };
+
+        let partitions_and_offsets = checkpoint
+            .load(&msg.partitions)
+            .await
+            .context("failed to load checkpoint")?;
+        if msg.checkpoint_tx.send(partitions_and_offsets).is_err() {
+            bail!("failed to respond with partition offsets, kafka consumer thread probably closed")
+        }
+
+        self.partition_to_offset.clear();
+
+        Ok(())
     }
 }
 
@@ -276,23 +318,8 @@ impl Source for KafkaSource {
                 MessageFromConsumerThread::PreRebalance => {
                     break SourceItem::Restart;
                 }
-                MessageFromConsumerThread::PostRebalance {
-                    partitions,
-                    checkpoint_tx,
-                } => {
-                    let Some(ref checkpoint) = self.checkpoint else {
-                        continue;
-                    };
-
-                    let partitions_and_offsets = checkpoint
-                        .load(&partitions)
-                        .await
-                        .context("failed to load checkpoint")?;
-                    if checkpoint_tx.send(partitions_and_offsets).is_err() {
-                        bail!("failed to respond with partition offsets, kafka consumer thread probably closed")
-                    }
-
-                    self.partition_to_offset.clear();
+                MessageFromConsumerThread::PostRebalance(msg) => {
+                    self.handle_post_rebalance_msg(msg).await?;
                 }
             }
         })

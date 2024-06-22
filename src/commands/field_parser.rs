@@ -10,7 +10,7 @@ use crate::config::{
     escaped_with_parent_name, number::NumberFieldType, FieldConfig, FieldConfigs, FieldType,
 };
 
-type ParseFn = Box<dyn Fn(serde_json::Value) -> Result<OwnedValue>>;
+type ParseFn = Box<dyn Fn(serde_json::Value) -> Result<OwnedValue> + Send + Sync>;
 
 enum FieldParserVariation {
     Value { field: Field, parse_fn: ParseFn },

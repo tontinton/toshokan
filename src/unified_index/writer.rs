@@ -18,7 +18,7 @@ use crate::bincode::bincode_options;
 use super::{FileCache, IndexFooter};
 
 struct FileReader {
-    reader: Box<dyn AsyncRead + Unpin>,
+    reader: Box<dyn AsyncRead + Send + Unpin>,
     file_name: PathBuf,
 }
 
@@ -30,7 +30,7 @@ impl FileReader {
         ))
     }
 
-    fn new(reader: Box<dyn AsyncRead + Unpin>, file_name: PathBuf) -> Self {
+    fn new(reader: Box<dyn AsyncRead + Send + Unpin>, file_name: PathBuf) -> Self {
         Self { reader, file_name }
     }
 }

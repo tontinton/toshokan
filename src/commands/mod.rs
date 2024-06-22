@@ -4,7 +4,7 @@ mod field_parser;
 pub mod index;
 pub mod merge;
 pub mod search;
-mod sources;
+pub mod sources;
 
 use std::{
     path::{Path, PathBuf},
