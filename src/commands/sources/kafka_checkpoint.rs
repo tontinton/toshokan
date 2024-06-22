@@ -50,8 +50,7 @@ impl Checkpoint {
     pub async fn save(&self, partitions_and_offsets: &[(i32, i64)]) -> Result<()> {
         let items = partitions_and_offsets
             .iter()
-            // Add 1 as we don't want to seek to the last record already read, but the next.
-            .map(|(p, o)| (&self.source_id, *p, *o + 1))
+            .map(|(p, o)| (&self.source_id, *p, *o))
             .collect::<Vec<_>>();
 
         let mut sql = String::from(
@@ -64,7 +63,7 @@ impl Checkpoint {
         sql.push_str(&params.join(", "));
         sql.push_str(" ON CONFLICT (source_id, partition) DO UPDATE SET offset_value = EXCLUDED.offset_value");
 
-        debug!("Saving checkpoints: {partitions_and_offsets:?}");
+        debug!("Saving checkpoints: {items:?}");
 
         let mut query = sqlx::query(&sql);
         for (source_id, partition, offset) in items {
