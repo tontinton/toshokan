@@ -17,16 +17,22 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord, Producer},
     ClientConfig,
 };
+use sqlx::PgPool;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::kafka::{Kafka as KafkaContainer, KAFKA_PORT};
 use tokio::{
     fs::{create_dir_all, remove_dir_all},
-    select,
-    sync::mpsc,
+    join, select, spawn,
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
 };
 use toshokan::{
     args::IndexArgs,
-    commands::{create::run_create_from_config, index::run_index},
+    commands::{
+        create::run_create_from_config,
+        index::{run_index, BatchResult, IndexRunner},
+        sources::kafka_source::parse_url,
+    },
     config::IndexConfig,
 };
 
@@ -37,7 +43,60 @@ fn init() {
     test_init();
 }
 
-pub async fn watch_for_new_file(dir: &str) -> Result<PathBuf> {
+async fn produce_logs(url: &str, logs: &str) -> Result<()> {
+    let (servers, topic) = parse_url(url)?;
+
+    let producer: FutureProducer = ClientConfig::new()
+        .set("bootstrap.servers", servers)
+        .set("message.timeout.ms", "5000")
+        .create()
+        .context("producer creation error")?;
+
+    for log in logs.trim().lines() {
+        producer
+            .send(
+                FutureRecord::to(topic).payload(log).key("key").partition(0),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+    }
+    producer.flush(Duration::from_secs(5))?;
+
+    Ok(())
+}
+
+fn spawn_one_index_batch_run(
+    index_name: String,
+    kafka_url: String,
+    pool: PgPool,
+) -> (oneshot::Receiver<()>, JoinHandle<BatchResult>) {
+    let (tx, rx) = oneshot::channel();
+
+    let handle = spawn(async move {
+        let mut runner = IndexRunner::new(
+            IndexArgs::parse_from([
+                "",
+                &index_name,
+                &kafka_url,
+                "--stream",
+                "--commit-interval",
+                "1m",
+            ]),
+            pool,
+        )
+        .await
+        .unwrap();
+
+        tx.send(()).unwrap();
+
+        runner.run_one_batch().await.unwrap()
+    });
+
+    (rx, handle)
+}
+
+async fn watch_for_new_file(dir: &str) -> Result<PathBuf> {
     let (tx, mut rx) = mpsc::channel(1);
 
     let mut watcher = recommended_watcher(move |event| {
@@ -86,6 +145,12 @@ async fn test_kafka_index_stream() -> Result<()> {
 
     run_create_from_config(&config, &postgres.pool).await?;
 
+    produce_logs(
+        &kafka_url,
+        include_str!("test_files/hdfs-logs-multitenants-2.json"),
+    )
+    .await?;
+
     let index_stream_fut = run_index(
         IndexArgs::parse_from([
             "",
@@ -98,27 +163,6 @@ async fn test_kafka_index_stream() -> Result<()> {
         &postgres.pool,
     );
 
-    let producer: FutureProducer = ClientConfig::new()
-        .set("bootstrap.servers", format!("127.0.0.1:{kafka_port}"))
-        .set("message.timeout.ms", "5000")
-        .create()
-        .context("producer creation error")?;
-
-    let logs = include_str!("test_files/hdfs-logs-multitenants-2.json");
-    for log in logs.trim().lines() {
-        producer
-            .send(
-                FutureRecord::to("test_topic")
-                    .payload(log)
-                    .key("key")
-                    .partition(0),
-                Duration::from_secs(5),
-            )
-            .await
-            .unwrap();
-    }
-    producer.flush(Duration::from_secs(5))?;
-
     select! {
         result = watch_for_new_file(&config.path) => {
             let file_path = result?;
@@ -126,6 +170,63 @@ async fn test_kafka_index_stream() -> Result<()> {
         }
         _ = index_stream_fut => {
             panic!("stream indexing should not exit before creating an index file");
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_kafka_index_stream_restart_on_rebalance() -> Result<()> {
+    let postgres = run_postgres().await?;
+
+    let kafka_container = KafkaContainer::default().start().await?;
+    let kafka_port = kafka_container.get_host_port_ipv4(KAFKA_PORT).await?;
+    let kafka_url = format!("kafka://127.0.0.1:{kafka_port}/test_topic");
+
+    let mut config = IndexConfig::from_str(include_str!("../example_config.yaml"))?;
+    config.path = "/tmp/toshokan_kafka_stream_rebalance".to_string();
+
+    // Just in case this path already exists, remove it.
+    let _ = remove_dir_all(&config.path).await;
+    create_dir_all(&config.path).await?;
+
+    run_create_from_config(&config, &postgres.pool).await?;
+
+    produce_logs(
+        &kafka_url,
+        include_str!("test_files/hdfs-logs-multitenants-2.json"),
+    )
+    .await?;
+
+    let (assignment_rx1, index_handle1) = spawn_one_index_batch_run(
+        config.name.to_string(),
+        kafka_url.to_string(),
+        postgres.pool.clone(),
+    );
+    let (assignment_rx2, index_handle2) = spawn_one_index_batch_run(
+        config.name.to_string(),
+        kafka_url.to_string(),
+        postgres.pool.clone(),
+    );
+
+    let (r1, r2) = join!(assignment_rx1, assignment_rx2);
+    r1?;
+    r2?;
+
+    let (assignment_rx3, _) = spawn_one_index_batch_run(
+        config.name.to_string(),
+        kafka_url.to_string(),
+        postgres.pool.clone(),
+    );
+    assignment_rx3.await?;
+
+    select! {
+        result = index_handle1 => {
+            assert_eq!(result?, BatchResult::Restart);
+        }
+        result = index_handle2 => {
+            assert_eq!(result?, BatchResult::Restart);
         }
     }
 

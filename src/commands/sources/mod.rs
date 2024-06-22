@@ -1,6 +1,6 @@
 mod buf_source;
 mod kafka_checkpoint;
-mod kafka_source;
+pub mod kafka_source;
 
 use async_trait::async_trait;
 use color_eyre::{eyre::bail, Result};
@@ -38,10 +38,10 @@ pub async fn connect_to_source(
     input: Option<&str>,
     stream: bool,
     pool: &PgPool,
-) -> Result<Box<dyn Source>> {
+) -> Result<Box<dyn Source + Send + Sync>> {
     Ok(match input {
         Some(url) if url.starts_with(KAFKA_PREFIX) => {
-            Box::new(KafkaSource::from_url(url, stream, pool)?)
+            Box::new(KafkaSource::from_url(url, stream, pool).await?)
         }
         Some(path) => {
             if stream {
