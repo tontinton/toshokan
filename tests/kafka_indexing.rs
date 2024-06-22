@@ -12,7 +12,11 @@ use color_eyre::{
     Result,
 };
 use ctor::ctor;
-use notify::{recommended_watcher, Event, EventKind, RecursiveMode, Watcher};
+use log::debug;
+use notify::{
+    event::{CreateKind, RemoveKind},
+    recommended_watcher, Event, EventKind, RecursiveMode, Watcher,
+};
 use rdkafka::{
     producer::{FutureProducer, FutureRecord, Producer},
     ClientConfig,
@@ -96,7 +100,7 @@ fn spawn_one_index_batch_run(
     (rx, handle)
 }
 
-async fn watch_for_new_file(dir: &str) -> Result<PathBuf> {
+async fn wait_for_inotify_event(dir: &str, is_event_fn: fn(EventKind) -> bool) -> Result<PathBuf> {
     let (tx, mut rx) = mpsc::channel(1);
 
     let mut watcher = recommended_watcher(move |event| {
@@ -106,18 +110,17 @@ async fn watch_for_new_file(dir: &str) -> Result<PathBuf> {
 
     loop {
         match rx.recv().await {
-            Some(Ok(event)) => match event {
-                Event {
-                    kind: EventKind::Create(_),
-                    paths,
-                    ..
-                } => {
-                    if let Some(path) = paths.first() {
-                        return Ok(path.clone());
-                    }
+            Some(Ok(Event { kind, paths, .. })) => {
+                debug!("Got inotify event '{:?}' on {:?}", kind, &paths);
+
+                if !is_event_fn(kind) {
+                    continue;
                 }
-                _ => (),
-            },
+
+                if let Some(path) = paths.first() {
+                    return Ok(path.clone());
+                }
+            }
             Some(Err(e)) => {
                 bail!("failed to watch '{dir}': {e}");
             }
@@ -126,6 +129,13 @@ async fn watch_for_new_file(dir: &str) -> Result<PathBuf> {
             }
         }
     }
+}
+
+async fn wait_for_file_create(dir: &str) -> Result<PathBuf> {
+    wait_for_inotify_event(dir, |event| {
+        matches!(event, EventKind::Create(CreateKind::File))
+    })
+    .await
 }
 
 #[tokio::test]
@@ -164,7 +174,7 @@ async fn test_kafka_index_stream() -> Result<()> {
     );
 
     select! {
-        result = watch_for_new_file(&config.path) => {
+        result = wait_for_file_create(&config.path) => {
             let file_path = result?;
             assert!(file_path.to_string_lossy().trim_end().ends_with(".index"));
         }
