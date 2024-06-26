@@ -17,7 +17,7 @@ use tokio::{
     task::spawn_blocking,
 };
 
-use super::{kafka_checkpoint::Checkpoint, Source, SourceItem};
+use super::{kafka_checkpoint::KafkaCheckpoint, CheckpointCommiter, Source, SourceItem};
 
 pub const KAFKA_PREFIX: &str = "kafka://";
 const CONSUMER_THREAD_MESSAGES_CHANNEL_SIZE: usize = 10;
@@ -155,7 +155,7 @@ type KafkaConsumer = BaseConsumer<KafkaContext>;
 
 pub struct KafkaSource {
     messages_rx: mpsc::Receiver<Result<MessageFromConsumerThread>>,
-    checkpoint: Option<Checkpoint>,
+    checkpoint: Option<KafkaCheckpoint>,
     partition_to_offset: BTreeMap<i32, i64>,
 
     #[cfg(feature = "in-tests")]
@@ -277,7 +277,7 @@ impl KafkaSource {
 
         let checkpoint = if stream {
             // Url is not a good identifier as a source id, but we'll live with it for now.
-            Some(Checkpoint::new(url.to_string(), pool.clone()))
+            Some(KafkaCheckpoint::new(url.to_string(), pool.clone()))
         } else {
             None
         };
@@ -335,7 +335,7 @@ impl KafkaSource {
         Ok(())
     }
 
-    fn track_saved_checkpoint(&mut self, partitions_and_offsets: Vec<(i32, i64)>) {
+    fn track_saved_checkpoint(&mut self, partitions_and_offsets: &[(i32, i64)]) {
         track_saved_checkpoint_impl!(self, partitions_and_offsets);
     }
 
@@ -374,10 +374,8 @@ impl Source for KafkaSource {
         })
     }
 
-    async fn on_index_created(&mut self) -> Result<()> {
-        let Some(ref checkpoint) = self.checkpoint else {
-            return Ok(());
-        };
+    async fn get_checkpoint_commiter(&mut self) -> Option<Box<dyn CheckpointCommiter + Send>> {
+        let checkpoint = self.checkpoint.clone()?;
 
         let flat = self
             .partition_to_offset
@@ -385,12 +383,9 @@ impl Source for KafkaSource {
             // Add 1 as we don't want to seek to the last record already read, but the next.
             .map(|(p, o)| (*p, *o + 1))
             .collect::<Vec<_>>();
-        checkpoint.save(&flat).await?;
-
-        self.track_saved_checkpoint(flat);
-
+        self.track_saved_checkpoint(&flat);
         self.partition_to_offset.clear();
 
-        Ok(())
+        Some(Box::new(checkpoint.commiter(flat)))
     }
 }

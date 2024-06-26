@@ -36,7 +36,7 @@ use toshokan::{
         index::{run_index, BatchResult, IndexRunner},
         sources::{
             kafka_source::{parse_url, KafkaSource},
-            Source, SourceItem,
+            CheckpointCommiter, Source, SourceItem,
         },
     },
     config::IndexConfig,
@@ -253,8 +253,13 @@ impl Source for ArcSource {
         self.0.clone().lock_owned().await.get_one().await
     }
 
-    async fn on_index_created(&mut self) -> Result<()> {
-        self.0.clone().lock_owned().await.on_index_created().await
+    async fn get_checkpoint_commiter(&mut self) -> Option<Box<dyn CheckpointCommiter + Send>> {
+        self.0
+            .clone()
+            .lock_owned()
+            .await
+            .get_checkpoint_commiter()
+            .await
     }
 }
 

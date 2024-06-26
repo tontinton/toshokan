@@ -1,15 +1,24 @@
 use std::collections::BTreeMap;
 
+use async_trait::async_trait;
 use color_eyre::Result;
 use sqlx::PgPool;
 
+use super::CheckpointCommiter;
+
 #[derive(Debug, Clone)]
-pub struct Checkpoint {
+pub struct KafkaCheckpoint {
     source_id: String,
     pool: PgPool,
 }
 
-impl Checkpoint {
+#[derive(Debug)]
+pub struct KafkaCheckpointCommiter {
+    checkpoint: KafkaCheckpoint,
+    partitions_and_offsets: Vec<(i32, i64)>,
+}
+
+impl KafkaCheckpoint {
     pub fn new(source_id: String, pool: PgPool) -> Self {
         Self { source_id, pool }
     }
@@ -72,6 +81,27 @@ impl Checkpoint {
 
         query.execute(&self.pool).await?;
 
+        Ok(())
+    }
+
+    pub fn commiter(self, partitions_and_offsets: Vec<(i32, i64)>) -> KafkaCheckpointCommiter {
+        KafkaCheckpointCommiter::new(self, partitions_and_offsets)
+    }
+}
+
+impl KafkaCheckpointCommiter {
+    pub fn new(checkpoint: KafkaCheckpoint, partitions_and_offsets: Vec<(i32, i64)>) -> Self {
+        Self {
+            checkpoint,
+            partitions_and_offsets,
+        }
+    }
+}
+
+#[async_trait]
+impl CheckpointCommiter for KafkaCheckpointCommiter {
+    async fn commit(&self) -> Result<()> {
+        self.checkpoint.save(&self.partitions_and_offsets).await?;
         Ok(())
     }
 }
