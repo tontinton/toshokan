@@ -47,8 +47,4 @@ impl Source for BufSource {
         self.line.clear();
         Ok(SourceItem::Document(map))
     }
-
-    async fn on_index_created(&mut self) -> Result<()> {
-        Ok(())
-    }
 }

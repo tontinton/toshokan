@@ -29,9 +29,18 @@ pub trait Source {
     /// Get a document from the source.
     async fn get_one(&mut self) -> Result<SourceItem>;
 
-    /// Called when an index file was just created to notify the source.
-    /// Useful for implementing checkpoints for example.
-    async fn on_index_created(&mut self) -> Result<()>;
+    /// If the source supports checkpointing, it creates a checkpoint commiter that stores a
+    /// snapshot of the last read state. Once the indexer has successfuly commited and uploaded
+    /// the new index file, it tells the checkpoint commiter to commit the snapshot.
+    async fn get_checkpoint_commiter(&mut self) -> Option<Box<dyn CheckpointCommiter + Send>> {
+        None
+    }
+}
+
+#[async_trait]
+pub trait CheckpointCommiter {
+    /// Commit the stored state snapshot.
+    async fn commit(&self) -> Result<()>;
 }
 
 pub async fn connect_to_source(

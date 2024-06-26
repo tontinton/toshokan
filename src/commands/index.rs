@@ -11,7 +11,7 @@ use tantivy::{
 };
 use tokio::{
     fs::{create_dir_all, remove_dir_all},
-    select,
+    select, spawn,
     task::spawn_blocking,
     time::sleep,
 };
@@ -26,8 +26,8 @@ use crate::{
 };
 
 use super::{
-    dynamic_field_config, field_parser::FieldParser, get_index_config, write_unified_index,
-    DYNAMIC_FIELD_NAME,
+    dynamic_field_config, field_parser::FieldParser, get_index_config, sources::CheckpointCommiter,
+    write_unified_index, DYNAMIC_FIELD_NAME,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -35,6 +35,13 @@ pub enum BatchResult {
     Eof,
     Timeout,
     Restart,
+}
+
+struct IndexCommiter {
+    index_name: String,
+    index_path: String,
+    pool: PgPool,
+    checkpoint_commiter: Option<Box<dyn CheckpointCommiter + Send>>,
 }
 
 pub struct IndexRunner {
@@ -87,7 +94,7 @@ impl IndexRunner {
         let index_dir = Path::new(&self.args.build_dir).join(&id);
         let _ = create_dir_all(&index_dir).await;
         let index = Index::open_or_create(MmapDirectory::open(&index_dir)?, self.schema.clone())?;
-        let mut index_writer: IndexWriter = index.writer(self.args.memory_budget)?;
+        let index_writer: IndexWriter = index.writer(self.args.memory_budget)?;
         index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
         let mut added = 0;
@@ -160,6 +167,40 @@ impl IndexRunner {
         }
 
         info!("Commiting {added} documents");
+
+        let commiter = self.index_commiter().await;
+        if self.args.stream && result != BatchResult::Eof {
+            // Commit in the background to not interfere with next batch in stream.
+            spawn(async move {
+                if let Err(e) =
+                    Self::commit_index(commiter, &id, &index, index_writer, &index_dir).await
+                {
+                    error!("Failed to commit index of id '{}': {e}", &id);
+                }
+            });
+        } else {
+            Self::commit_index(commiter, &id, &index, index_writer, &index_dir).await?;
+        }
+
+        Ok(result)
+    }
+
+    async fn index_commiter(&mut self) -> IndexCommiter {
+        IndexCommiter {
+            index_name: self.config.name.clone(),
+            index_path: self.config.path.clone(),
+            pool: self.pool.clone(),
+            checkpoint_commiter: self.source.get_checkpoint_commiter().await,
+        }
+    }
+
+    async fn commit_index(
+        commiter: IndexCommiter,
+        id: &str,
+        index: &Index,
+        mut index_writer: IndexWriter,
+        input_dir: &Path,
+    ) -> Result<()> {
         index_writer.prepare_commit()?.commit_future().await?;
 
         let segment_ids = index.searchable_segment_ids()?;
@@ -171,18 +212,20 @@ impl IndexRunner {
         spawn_blocking(move || index_writer.wait_merging_threads()).await??;
 
         write_unified_index(
-            &id,
-            &index,
-            &index_dir,
-            &self.config.name,
-            &self.config.path,
-            &self.pool,
+            id,
+            index,
+            input_dir,
+            &commiter.index_name,
+            &commiter.index_path,
+            &commiter.pool,
         )
         .await?;
 
-        self.source.on_index_created().await?;
+        if let Some(checkpoint_commiter) = commiter.checkpoint_commiter {
+            checkpoint_commiter.commit().await?;
+        }
 
-        Ok(result)
+        Ok(())
     }
 }
 
