@@ -335,11 +335,14 @@ impl KafkaSource {
         Ok(())
     }
 
-    fn track_saved_checkpoint(&mut self, partitions_and_offsets: &[(i32, i64)]) {
+    fn track_saved_checkpoint(&mut self, #[allow(unused)] partitions_and_offsets: &[(i32, i64)]) {
         track_saved_checkpoint_impl!(self, partitions_and_offsets);
     }
 
-    fn track_loaded_checkpoint(&mut self, partitions_and_offsets: &[(i32, Option<i64>)]) {
+    fn track_loaded_checkpoint(
+        &mut self,
+        #[allow(unused)] partitions_and_offsets: &[(i32, Option<i64>)],
+    ) {
         track_loaded_checkpoint_impl!(self, partitions_and_offsets);
     }
 }
