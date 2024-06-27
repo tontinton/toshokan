@@ -1,25 +1,19 @@
-use std::{ops::Range, path::Path};
+use std::ops::Range;
 
 use opendal::BlockingReader;
 use tantivy::{
     directory::{FileHandle, OwnedBytes},
     HasLen,
 };
-use tokio::fs::metadata;
 
 pub struct OpenDalFileHandle {
-    size: u64,
     reader: BlockingReader,
+    size: usize,
 }
 
 impl OpenDalFileHandle {
-    pub async fn from_path(path: &Path, reader: BlockingReader) -> std::io::Result<Self> {
-        let size = metadata(path).await?.len();
-        Ok(Self::new(size, reader))
-    }
-
-    fn new(size: u64, reader: BlockingReader) -> Self {
-        Self { size, reader }
+    pub fn new(reader: BlockingReader, size: usize) -> Self {
+        Self { reader, size }
     }
 }
 
@@ -40,7 +34,7 @@ impl FileHandle for OpenDalFileHandle {
 
 impl HasLen for OpenDalFileHandle {
     fn len(&self) -> usize {
-        self.size as usize
+        self.size
     }
 }
 
