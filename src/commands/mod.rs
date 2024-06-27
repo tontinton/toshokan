@@ -69,7 +69,7 @@ async fn open_unified_directories(
     index_dir: &str,
     pool: &PgPool,
 ) -> Result<Vec<(String, UnifiedDirectory)>> {
-    let items = query!("SELECT id, file_name, footer_len FROM index_files")
+    let items = query!("SELECT id, file_name, len, footer_len FROM index_files")
         .fetch_all(pool)
         .await?;
 
@@ -84,12 +84,9 @@ async fn open_unified_directories(
     let mut directories_args = Vec::with_capacity(items.len());
     for item in items {
         let reader = op.reader_with(&item.file_name).call()?;
-        let file_slice = FileSlice::new(Arc::new(
-            OpenDalFileHandle::from_path(&Path::new(index_dir).join(&item.file_name), reader)
-                .await?,
-        ));
-
-        directories_args.push((item.id, file_slice, item.footer_len))
+        let file_slice =
+            FileSlice::new(Arc::new(OpenDalFileHandle::new(reader, item.len as usize)));
+        directories_args.push((item.id, file_slice, item.footer_len as usize))
     }
 
     let results = try_join_all(
@@ -97,10 +94,7 @@ async fn open_unified_directories(
             .into_iter()
             .map(|(id, file_slice, footer_len)| {
                 spawn_blocking(move || -> Result<(String, UnifiedDirectory)> {
-                    Ok((
-                        id,
-                        UnifiedDirectory::open_with_len(file_slice, footer_len as usize)?,
-                    ))
+                    Ok((id, UnifiedDirectory::open_with_len(file_slice, footer_len)?))
                 })
             }),
     )
@@ -146,11 +140,12 @@ async fn write_unified_index(
     writer.shutdown().await?;
 
     query(
-        "INSERT INTO index_files (id, index_name, file_name, footer_len) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO index_files (id, index_name, file_name, len, footer_len) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(id)
     .bind(index_name)
     .bind(&file_name)
+    .bind(total_len as i64)
     .bind(footer_len as i64)
     .execute(pool)
     .await?;

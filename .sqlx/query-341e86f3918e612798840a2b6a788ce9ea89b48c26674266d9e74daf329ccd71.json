@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, file_name, footer_len FROM index_files",
+  "query": "SELECT id, file_name, len, footer_len FROM index_files",
   "describe": {
     "columns": [
       {
@@ -15,6 +15,11 @@
       },
       {
         "ordinal": 2,
+        "name": "len",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
         "name": "footer_len",
         "type_info": "Int8"
       }
@@ -25,8 +30,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "1e6cc5b9e8215920d475181c9589127308d92f38f6851b20468b9a2adc77b535"
+  "hash": "341e86f3918e612798840a2b6a788ce9ea89b48c26674266d9e74daf329ccd71"
 }
