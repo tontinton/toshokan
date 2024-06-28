@@ -16,7 +16,7 @@ use futures::future::try_join_all;
 use opendal::{layers::LoggingLayer, Operator};
 use sqlx::{query, query_as, PgPool};
 use tantivy::{directory::FileSlice, schema::IndexRecordOption, Index};
-use tokio::{io::AsyncWriteExt, task::spawn_blocking};
+use tokio::{io::AsyncWriteExt, runtime::Builder, task::spawn_blocking};
 use tokio_util::compat::FuturesAsyncWriteCompatExt;
 
 use crate::{
@@ -88,17 +88,28 @@ async fn open_unified_directories(
     index_path: &str,
     pool: &PgPool,
 ) -> Result<Vec<(String, UnifiedDirectory)>> {
-    let op = get_operator(index_path)?.blocking();
+    let op = get_operator(index_path)?;
 
     let items = query!("SELECT id, file_name, len, footer_len FROM index_files")
         .fetch_all(pool)
         .await?;
 
+    // Tantivy doesn't support async (tantivy::directory::FileHandle's read_bytes() is a sync fn),
+    // and opendal's s3 service doesn't support sync...
+    // To make them work together, we create a tokio runtime just for making opendal async calls
+    // when tantivy requests a read from our opendal file.
+    // The efficient solution is to make tantivy work in async rust, but that is a journey for
+    // another time.
+    let runtime = Arc::new(Builder::new_multi_thread().enable_all().build()?);
+
     let mut directories_args = Vec::with_capacity(items.len());
     for item in items {
-        let reader = op.reader_with(&item.file_name).call()?;
-        let file_slice =
-            FileSlice::new(Arc::new(OpenDalFileHandle::new(reader, item.len as usize)));
+        let reader = op.reader_with(&item.file_name).await?;
+        let file_slice = FileSlice::new(Arc::new(OpenDalFileHandle::new(
+            runtime.clone(),
+            reader,
+            item.len as usize,
+        )));
         directories_args.push((item.id, file_slice, item.footer_len as usize))
     }
 
