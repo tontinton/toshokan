@@ -1,22 +1,22 @@
-use std::{ops::Range, sync::Arc};
+use std::ops::Range;
 
 use opendal::Reader;
 use tantivy::{
     directory::{FileHandle, OwnedBytes},
     HasLen,
 };
-use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
 
 pub struct OpenDalFileHandle {
-    runtime: Arc<Runtime>,
+    handle: Handle,
     reader: Reader,
     size: usize,
 }
 
 impl OpenDalFileHandle {
-    pub fn new(runtime: Arc<Runtime>, reader: Reader, size: usize) -> Self {
+    pub fn new(handle: Handle, reader: Reader, size: usize) -> Self {
         Self {
-            runtime,
+            handle,
             reader,
             size,
         }
@@ -32,7 +32,7 @@ impl std::fmt::Debug for OpenDalFileHandle {
 impl FileHandle for OpenDalFileHandle {
     fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
         let mut bytes = Vec::new();
-        self.runtime.block_on(
+        self.handle.block_on(
             self.reader
                 .read_into(&mut bytes, range.start as u64..range.end as u64),
         )?;
