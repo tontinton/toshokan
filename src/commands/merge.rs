@@ -1,20 +1,18 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use color_eyre::Result;
+use futures::future::join_all;
 use sqlx::{query, PgPool};
 use tantivy::{
     directory::{DirectoryClone, MmapDirectory},
     indexer::NoMergePolicy,
     Index, IndexWriter,
 };
-use tokio::{
-    fs::{create_dir, remove_file},
-    task::spawn_blocking,
-};
+use tokio::{fs::create_dir_all, task::spawn_blocking};
 
 use crate::{args::MergeArgs, merge_directory::MergeDirectory};
 
-use super::{get_index_config, open_unified_directories, write_unified_index};
+use super::{get_index_config, get_operator, open_unified_directories, write_unified_index};
 
 const MIN_TANTIVY_MEMORY: usize = 15_000_000;
 
@@ -34,7 +32,7 @@ pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
 
     let id = uuid::Uuid::now_v7().hyphenated().to_string();
     let index_dir = Path::new(&args.merge_dir).join(&id);
-    let _ = create_dir(&index_dir).await;
+    let _ = create_dir_all(&index_dir).await;
     let output_dir = MmapDirectory::open(&index_dir)?;
 
     let index = Index::open(MergeDirectory::new(directories, output_dir.box_clone())?)?;
@@ -56,15 +54,20 @@ pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
         .execute(pool)
         .await?;
 
-    for id in ids {
-        let _ = remove_file(
-            Path::new(&config.path)
-                .join(format!("{}.index", id))
-                .to_str()
-                .expect("failed to build index path"),
-        )
-        .await;
-    }
+    let op = Arc::new(get_operator(&config.path).await?);
+    join_all(
+        ids.into_iter()
+            .map(|id| (format!("{}.index", id), op.clone()))
+            .map(|(file_name, op)| async move {
+                if let Err(e) = op.delete(&file_name).await {
+                    warn!(
+                        "Failed to delete index file '{file_name}': {e}.
+Don't worry, this just means the file is leaked, but will never be read from again."
+                    );
+                }
+            }),
+    )
+    .await;
 
     Ok(())
 }
