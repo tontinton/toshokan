@@ -13,7 +13,7 @@ use std::{
 
 use color_eyre::Result;
 use futures::future::try_join_all;
-use opendal::{layers::LoggingLayer, BlockingOperator, Operator};
+use opendal::{layers::LoggingLayer, Operator};
 use sqlx::{query, query_as, PgPool};
 use tantivy::{directory::FileSlice, schema::IndexRecordOption, Index};
 use tokio::{io::AsyncWriteExt, task::spawn_blocking};
@@ -35,6 +35,7 @@ use crate::{
 };
 
 const DYNAMIC_FIELD_NAME: &str = "_dynamic";
+const S3_PREFIX: &str = "s3://";
 
 fn dynamic_field_config() -> DynamicObjectFieldConfig {
     DynamicObjectFieldConfig {
@@ -65,21 +66,33 @@ async fn get_index_path(name: &str, pool: &PgPool) -> Result<String> {
     Ok(serde_json::from_value(value)?)
 }
 
+fn get_operator(path: &str) -> opendal::Result<Operator> {
+    let op = if let Some(bucket) = path.strip_prefix(S3_PREFIX) {
+        let mut s3 = opendal::services::S3::default();
+        s3.endpoint("http://127.0.0.1:9000")
+            .access_key_id("access")
+            .secret_access_key("secret123")
+            .region("us-east-1")
+            .bucket(bucket);
+        Operator::new(s3)?.layer(LoggingLayer::default()).finish()
+    } else {
+        let mut fs = opendal::services::Fs::default();
+        fs.root(path);
+        Operator::new(fs)?.layer(LoggingLayer::default()).finish()
+    };
+
+    Ok(op)
+}
+
 async fn open_unified_directories(
-    index_dir: &str,
+    index_path: &str,
     pool: &PgPool,
 ) -> Result<Vec<(String, UnifiedDirectory)>> {
+    let op = get_operator(index_path)?.blocking();
+
     let items = query!("SELECT id, file_name, len, footer_len FROM index_files")
         .fetch_all(pool)
         .await?;
-
-    let mut builder = opendal::services::Fs::default();
-    builder.root(index_dir);
-
-    let op: BlockingOperator = Operator::new(builder)?
-        .layer(LoggingLayer::default())
-        .finish()
-        .blocking();
 
     let mut directories_args = Vec::with_capacity(items.len());
     for item in items {
@@ -108,22 +121,17 @@ async fn write_unified_index(
     index: &Index,
     input_dir: &Path,
     index_name: &str,
-    index_dir: &str,
+    index_path: &str,
     pool: &PgPool,
 ) -> Result<()> {
+    let op = get_operator(index_path)?;
+
     let cloned_input_dir = PathBuf::from(input_dir);
     let file_cache = spawn_blocking(move || build_file_cache(&cloned_input_dir)).await??;
 
     let unified_index_writer =
         UnifiedIndexWriter::from_file_paths(input_dir, index.directory().list_managed_files())
             .await?;
-
-    let mut builder = opendal::services::Fs::default();
-    builder.root(index_dir);
-
-    let op = Operator::new(builder)?
-        .layer(LoggingLayer::default())
-        .finish();
 
     let file_name = format!("{}.index", id);
     let mut writer = op
