@@ -51,10 +51,10 @@ pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
 
     write_unified_index(&id, &index, &index_dir, &config.name, &config.path, pool).await?;
 
-    let delete_result = query("DELETE FROM index_files WHERE id = ANY($1)")
+    query("DELETE FROM index_files WHERE id = ANY($1)")
         .bind(&ids)
         .execute(pool)
-        .await;
+        .await?;
 
     for id in ids {
         let _ = remove_file(
@@ -65,8 +65,6 @@ pub async fn run_merge(args: MergeArgs, pool: &PgPool) -> Result<()> {
         )
         .await;
     }
-
-    delete_result?;
 
     Ok(())
 }
