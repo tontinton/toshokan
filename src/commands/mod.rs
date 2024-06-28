@@ -11,7 +11,7 @@ use std::{
     sync::Arc,
 };
 
-use color_eyre::Result;
+use color_eyre::{eyre::bail, Result};
 use futures::future::try_join_all;
 use opendal::{layers::LoggingLayer, Operator};
 use sqlx::{query, query_as, PgPool};
@@ -66,14 +66,27 @@ async fn get_index_path(name: &str, pool: &PgPool) -> Result<String> {
     Ok(serde_json::from_value(value)?)
 }
 
-fn get_operator(path: &str) -> opendal::Result<Operator> {
+async fn get_operator(path: &str) -> Result<Operator> {
     let op = if let Some(bucket) = path.strip_prefix(S3_PREFIX) {
+        let mut unset_env_vars = Vec::new();
+        for env_var in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"] {
+            if let Err(e) = std::env::var(env_var) {
+                debug!("Failed to check env var '{env_var}': {e}");
+                unset_env_vars.push(env_var);
+            }
+        }
+
+        if !unset_env_vars.is_empty() {
+            bail!(
+                "The following mandatory environment variables to use s3 are not set: {unset_env_vars:?}"
+            );
+        }
+
+        let endpoint =
+            std::env::var("S3_ENDPOINT").unwrap_or_else(|_| "https://s3.amazonaws.com".to_string());
+
         let mut s3 = opendal::services::S3::default();
-        s3.endpoint("http://127.0.0.1:9000")
-            .access_key_id("access")
-            .secret_access_key("secret123")
-            .region("us-east-1")
-            .bucket(bucket);
+        s3.endpoint(&endpoint).bucket(bucket);
         Operator::new(s3)?.layer(LoggingLayer::default()).finish()
     } else {
         let mut fs = opendal::services::Fs::default();
@@ -88,7 +101,7 @@ async fn open_unified_directories(
     index_path: &str,
     pool: &PgPool,
 ) -> Result<Vec<(String, UnifiedDirectory)>> {
-    let op = get_operator(index_path)?;
+    let op = get_operator(index_path).await?;
 
     let items = query!("SELECT id, file_name, len, footer_len FROM index_files")
         .fetch_all(pool)
@@ -135,7 +148,7 @@ async fn write_unified_index(
     index_path: &str,
     pool: &PgPool,
 ) -> Result<()> {
-    let op = get_operator(index_path)?;
+    let op = get_operator(index_path).await?;
 
     let cloned_input_dir = PathBuf::from(input_dir);
     let file_cache = spawn_blocking(move || build_file_cache(&cloned_input_dir)).await??;
