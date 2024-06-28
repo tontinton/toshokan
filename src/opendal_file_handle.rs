@@ -32,10 +32,11 @@ impl std::fmt::Debug for OpenDalFileHandle {
 impl FileHandle for OpenDalFileHandle {
     fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
         let mut bytes = Vec::new();
-        self.handle.block_on(
+        let size = self.handle.block_on(
             self.reader
                 .read_into(&mut bytes, range.start as u64..range.end as u64),
         )?;
+        assert_eq!(size, bytes.len());
         Ok(OwnedBytes::new(bytes))
     }
 }
