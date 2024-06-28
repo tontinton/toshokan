@@ -65,14 +65,14 @@ mod tests {
         let mut builder = opendal::services::Fs::default();
         builder.root(path.parent().unwrap().to_str().unwrap());
 
-        let op = Operator::new(builder)?.finish().blocking();
+        let op = Operator::new(builder)?.finish();
 
-        let reader = OpenDalFileHandle::from_path(
-            path,
+        let reader = OpenDalFileHandle::new(
+            Handle::current(),
             op.reader_with(path.file_name().unwrap().to_str().unwrap())
-                .call()?,
-        )
-        .await?;
+                .await?,
+            8,
+        );
 
         let bytes = spawn_blocking(move || reader.read_bytes(0..reader.len())).await??;
         assert_eq!(bytes.to_vec(), b"abcdefgh".to_vec());
