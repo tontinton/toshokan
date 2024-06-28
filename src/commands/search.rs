@@ -1,7 +1,7 @@
 use std::{backtrace::Backtrace, collections::BTreeMap};
 
 use color_eyre::{eyre::eyre, Result};
-use futures::future::select_all;
+use futures::future::{join_all, select_all};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use sqlx::PgPool;
 use tantivy::{
@@ -218,6 +218,8 @@ pub async fn run_search_with_callback(
     loop {
         select! {
             _ = &mut rx_handle => {
+                // Wait for all tx threads to cleanly finish.
+                let _ = join_all(tx_handles).await;
                 break;
             }
             (result, i, _) = select_all(&mut tx_handles) => {
@@ -227,6 +229,8 @@ pub async fn run_search_with_callback(
 
                 tx_handles.remove(i);
                 if tx_handles.is_empty() {
+                    // Wait for rx task to cleanly finish.
+                    let _ = rx_handle.await;
                     break;
                 }
             }
