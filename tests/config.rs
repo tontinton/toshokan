@@ -40,13 +40,13 @@ async fn get_number_of_files_in_dir<P: AsRef<Path>>(dir: P) -> std::io::Result<u
 }
 
 #[rstest]
-#[case(
+#[case::example_config(
     include_str!("../example_config.yaml"),
     include_str!("test_files/hdfs-logs-multitenants-2.json"),
     "tenant_id:>50 AND severity_text:INFO",
     r#"{"attributes":{"class":"org.apache.hadoop.hdfs.server.datanode.DataNode"},"body":"PacketResponder: BP-108841162-10.10.34.11-1440074360971:blk_1074072698_331874, type=HAS_DOWNSTREAM_IN_PIPELINE terminating","resource":{"service":"datanode/01"},"severity_text":"INFO","tenant_id":58,"timestamp":"2016-04-13T06:46:53Z"}"#,
 )]
-#[case(
+#[case::array_of_u64(
     "
 version: 1
 name: array_test
@@ -62,7 +62,7 @@ schema:
     "*",
     r#"{"array":[1,2,3,4]}"#
 )]
-#[case(
+#[case::boolean(
     "
 version: 1
 name: boolean_test
@@ -79,7 +79,7 @@ schema:
     "something:false",
     r#"{"something":false}"#
 )]
-#[case(
+#[case::ip(
     "
 version: 1
 name: ip_test
@@ -97,7 +97,7 @@ schema:
     "something:[190.0.0.1 TO 195.200.10.1]",
     r#"{"something":"192.168.0.1"}"#
 )]
-#[case(
+#[case::parse_string(
     "
 version: 1
 name: parse_string_test
