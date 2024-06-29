@@ -1,12 +1,8 @@
 mod common;
 
-use std::{path::Path, str::FromStr};
+use std::str::FromStr;
 
 use async_tempfile::TempFile;
-use aws_sdk_s3::{
-    config::{Credentials, Region, SharedCredentialsProvider},
-    Client,
-};
 use clap::Parser;
 use color_eyre::Result;
 use ctor::ctor;
@@ -14,23 +10,17 @@ use lazy_static::lazy_static;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use rstest::rstest;
 use rstest_reuse::{self, *};
-use testcontainers::{runners::AsyncRunner, ContainerAsync, RunnableImage};
-use testcontainers_modules::localstack::LocalStack;
-use tokio::{
-    fs::{read_dir, remove_dir_all},
-    io::AsyncWriteExt,
-    sync::{mpsc, Mutex},
-};
+use tokio::{fs::remove_dir_all, io::AsyncWriteExt, sync::Mutex};
 use toshokan::{
-    args::{DropArgs, IndexArgs, SearchArgs},
-    commands::{
-        create::run_create_from_config, drop::run_drop, index::run_index,
-        search::run_search_with_callback,
-    },
+    args::{DropArgs, IndexArgs},
+    commands::{create::run_create_from_config, drop::run_drop, index::run_index},
     config::IndexConfig,
 };
 
-use crate::common::{run_postgres, test_init};
+use crate::common::{
+    get_number_of_files_in_dir, run_postgres, run_s3, search_one, test_init, AWS_ACCESS_KEY_ID,
+    AWS_REGION, AWS_SECRET_ACCESS_KEY,
+};
 
 lazy_static! {
     static ref ENV_VAR_LOCK: Mutex<()> = Mutex::new(());
@@ -39,24 +29,6 @@ lazy_static! {
 #[ctor]
 fn init() {
     test_init();
-}
-
-async fn run_localstack(services: &str) -> Result<ContainerAsync<LocalStack>> {
-    let image: RunnableImage<LocalStack> = LocalStack::default().into();
-    let image = image.with_env_var(("SERVICES", services));
-    let container = image.start().await?;
-    Ok(container)
-}
-
-async fn get_number_of_files_in_dir<P: AsRef<Path>>(dir: P) -> std::io::Result<usize> {
-    let mut file_count = 0;
-    let mut entries = read_dir(dir).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        if entry.file_type().await?.is_file() {
-            file_count += 1;
-        }
-    }
-    Ok(file_count)
 }
 
 #[template]
@@ -199,17 +171,10 @@ async fn test_config_fs(
 
     assert_eq!(get_number_of_files_in_dir(&config.path).await?, 1);
 
-    let (tx, mut rx) = mpsc::channel(1);
-    run_search_with_callback(
-        SearchArgs::parse_from(["", &config.name, query, "--limit", "1"]),
-        &postgres.pool,
-        Box::new(move |doc| {
-            tx.try_send(doc).unwrap();
-        }),
-    )
-    .await?;
-
-    assert_eq!(rx.recv().await.unwrap(), expected_output);
+    assert_eq!(
+        search_one(&config.name, query, &postgres.pool).await?,
+        expected_output
+    );
 
     run_drop(DropArgs::parse_from(["", &config.name]), &postgres.pool).await?;
 
@@ -231,20 +196,8 @@ async fn test_config_s3(
     // Running in an isolated container, no need for random path.
     config.path = "s3://toshokan".to_string();
 
-    let container = run_localstack("s3").await?;
-    let s3_port = container.get_host_port_ipv4(4566).await?;
-    let endpoint_url = format!("http://127.0.0.1:{s3_port}");
-
-    let client = Client::from_conf(
-        aws_sdk_s3::Config::builder()
-            .region(Region::new("us-east-1"))
-            .endpoint_url(&endpoint_url)
-            .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
-                "test1", "test2", None, None, "local",
-            )))
-            .build(),
-    );
-    client.create_bucket().bucket("toshokan").send().await?;
+    let s3 = run_s3().await?;
+    s3.client.create_bucket().bucket("toshokan").send().await?;
 
     run_create_from_config(&config, &postgres.pool).await?;
 
@@ -254,10 +207,10 @@ async fn test_config_s3(
         .await?;
 
     let _lock = ENV_VAR_LOCK.lock().await;
-    std::env::set_var("S3_ENDPOINT", &endpoint_url);
-    std::env::set_var("AWS_ACCESS_KEY_ID", "test1");
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", "test2");
-    std::env::set_var("AWS_REGION", "us-east-1");
+    std::env::set_var("S3_ENDPOINT", &s3.endpoint_url);
+    std::env::set_var("AWS_ACCESS_KEY_ID", AWS_ACCESS_KEY_ID);
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", AWS_SECRET_ACCESS_KEY);
+    std::env::set_var("AWS_REGION", AWS_REGION);
 
     run_index(
         IndexArgs::parse_from([
@@ -269,17 +222,10 @@ async fn test_config_s3(
     )
     .await?;
 
-    let (tx, mut rx) = mpsc::channel(1);
-    run_search_with_callback(
-        SearchArgs::parse_from(["", &config.name, query, "--limit", "1"]),
-        &postgres.pool,
-        Box::new(move |doc| {
-            tx.try_send(doc).unwrap();
-        }),
-    )
-    .await?;
-
-    assert_eq!(rx.recv().await.unwrap(), expected_output);
+    assert_eq!(
+        search_one(&config.name, query, &postgres.pool).await?,
+        expected_output
+    );
 
     run_drop(DropArgs::parse_from(["", &config.name]), &postgres.pool).await?;
 
