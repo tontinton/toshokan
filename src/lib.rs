@@ -4,6 +4,7 @@ pub mod commands;
 pub mod config;
 pub mod merge_directory;
 pub mod opendal_file_handle;
+pub mod page_cache_file_handle;
 pub mod unified_index;
 
 #[macro_use]

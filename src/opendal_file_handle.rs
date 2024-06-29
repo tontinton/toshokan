@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use async_trait::async_trait;
 use opendal::Reader;
 use tantivy::{
     directory::{FileHandle, OwnedBytes},
@@ -25,17 +26,22 @@ impl OpenDalFileHandle {
 
 impl std::fmt::Debug for OpenDalFileHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "FileReader({})", &self.size)
+        write!(f, "OpenDalFileHandle({})", &self.size)
     }
 }
 
+#[async_trait]
 impl FileHandle for OpenDalFileHandle {
     fn read_bytes(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
+        self.handle.block_on(self.read_bytes_async(range))
+    }
+
+    async fn read_bytes_async(&self, range: Range<usize>) -> std::io::Result<OwnedBytes> {
         let mut bytes = Vec::new();
-        let size = self.handle.block_on(
-            self.reader
-                .read_into(&mut bytes, range.start as u64..range.end as u64),
-        )?;
+        let size = self
+            .reader
+            .read_into(&mut bytes, range.start as u64..range.end as u64)
+            .await?;
         assert_eq!(size, bytes.len());
         Ok(OwnedBytes::new(bytes))
     }
