@@ -35,7 +35,7 @@ jobs:
       - name: Cache setup
         uses: ./.github/actions/cache-setup
 
-      - name: Unit tests
+      - name: Unit + Integration tests
         run: RUST_BACKTRACE=1 RSTEST_TIMEOUT=120 cargo test --all
 
   lint:
