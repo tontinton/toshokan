@@ -28,6 +28,7 @@ use crate::{
         FastFieldNormalizerType, FieldTokenizerType, IndexConfig,
     },
     opendal_file_handle::OpenDalFileHandle,
+    page_cache_file_handle::PageCacheFileHandle,
     unified_index::{
         file_cache::build_file_cache, unified_directory::UnifiedDirectory,
         writer::UnifiedIndexWriter,
@@ -118,10 +119,13 @@ async fn open_unified_directories(
     let mut directories_args = Vec::with_capacity(items.len());
     for item in items {
         let reader = op.reader_with(&item.file_name).await?;
-        let file_slice = FileSlice::new(Arc::new(OpenDalFileHandle::new(
+        let file_slice = FileSlice::new(Arc::new(PageCacheFileHandle::new(
             handle.clone(),
-            reader,
-            item.len as usize,
+            Box::new(OpenDalFileHandle::new(
+                handle.clone(),
+                reader,
+                item.len as usize,
+            )),
         )));
         directories_args.push((item.id, file_slice, item.footer_len as usize))
     }
