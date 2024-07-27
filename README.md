@@ -1,3 +1,22 @@
+## Introduction
+
+`toshokan` is a search engine (think Elasticsearch, Splunk), but storing the data on object storage, most similar to <a href="https://github.com/quickwit-oss/quickwit">Quickwit</a>.
+
+It uses:
+* <a href="https://github.com/quickwit-oss/tantivy">tantivy</a> - for building and searching the inverted index data structure.
+* <a href="https://github.com/apache/opendal">Apache OpenDAL</a> - for an abstraction over object storages.
+* <a href="https://www.postgresql.org/">PostgreSQL</a> - for storing metadata atomically, removing data races.
+
+I've also posted a <a href="https://tontinton.com/posts/new-age-data-intensive-apps/">blog post</a> explaining the benefits and drawbacks of using an object storage for data intensive applications.
+
+## Architecture
+
+<kbd style="background-color: #1e1e1e">
+  <img src="./architecture.svg">
+</kbd>
+
+## How to use
+
 ```sh
 toshokan create example_config.yaml
 
@@ -21,6 +40,9 @@ toshokan search test "tenant_id:[60 TO 65} AND severity_text:INFO" --limit 1 | j
 #   "tenant_id": 61,
 #   "timestamp": "2016-04-13T06:46:54Z"
 # }
+
+# Merge index files for faster searching.
+toshokan merge test
 
 toshokan drop test
 ```
