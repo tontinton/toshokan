@@ -6,6 +6,7 @@ authors = ["Tony Solomonik @ tony.solomonik@gmail.com"]
 description = "A search engine on object storage."
 repository = "https://github.com/tontinton/toshokan"
 homepage = "https://github.com/tontinton/toshokan"
+license = "Apache-2.0 OR MIT"
 
 [profile.release]
 strip = true
