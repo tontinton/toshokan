@@ -3,6 +3,9 @@ name = "toshokan"
 version = "0.1.0"
 edition = "2021"
 authors = ["Tony Solomonik @ tony.solomonik@gmail.com"]
+description = "A search engine on object storage."
+repository = "https://github.com/tontinton/toshokan"
+homepage = "https://github.com/tontinton/toshokan"
 
 [profile.release]
 strip = true
